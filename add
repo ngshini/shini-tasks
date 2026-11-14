@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Thêm việc nhanh từ terminal:  ./add "Mai 9h họp team !gấp #work 30p" """
+import json, sys, urllib.request
+text = " ".join(sys.argv[1:]).strip()
+if not text:
+    print('Cách dùng: ./add "Mai 9h họp team !gấp #work 30p"'); sys.exit(1)
+req = urllib.request.Request("http://127.0.0.1:8790/api/quick",
+    data=json.dumps({"text": text, "source": "cli"}).encode(),
+    headers={"Content-Type": "application/json"})
+with urllib.request.urlopen(req, timeout=5) as r:
+    t = json.loads(r.read())["task"]
+print(f"✓ Đã thêm: {t['title']} | hạn: {t['due_date'] or 'chưa đặt'} {t['due_time'] or ''} | {t['quadrant']} | điểm {t['score']}")

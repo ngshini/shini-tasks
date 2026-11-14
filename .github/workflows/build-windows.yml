@@ -1,0 +1,118 @@
+name: Build Windows Setup.exe
+
+# Dong goi Shini Tasks (huong A) tren may ao Windows cua GitHub:
+# engine PyInstaller 1 file + app GTK4 onedir (MSYS2 UCRT64) + Inno Setup.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cai MSYS2 + GTK4/libadwaita/Python
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-python-cairo
+            mingw-w64-ucrt-x86_64-python-pillow
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-hicolor-icon-theme
+            mingw-w64-ucrt-x86_64-glib2
+
+      - name: Cai PyInstaller
+        run: python -m pip install --break-system-packages pyinstaller pyinstaller-hooks-contrib
+
+      - name: Bien moi truong + icon + schemas
+        run: |
+          echo "MSYS2_PREFIX=$(cygpath -wm /ucrt64)" >> "$GITHUB_ENV"
+          python tools/make_icon.py packaging/shini.ico
+          glib-compile-schemas /ucrt64/share/glib-2.0/schemas || true
+
+      - name: Build engine (1 file exe)
+        run: pyinstaller --noconfirm --distpath build/dist-engine --workpath build/eng packaging/ShiniTasksEngine.spec
+
+      - name: Kiem thu engine — mo exe, goi API that
+        shell: pwsh
+        run: |
+          $exe = "build\dist-engine\ShiniTasksEngine.exe"
+          Start-Process -FilePath $exe
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Milliseconds 750
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8790/api/stats -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ok = $true; $r.Content; break }
+            } catch {}
+          }
+          taskkill /F /IM ShiniTasksEngine.exe /T 2>$null | Out-Null
+          if (-not $ok) { throw "Engine khong tra loi API sau 30 giay" }
+
+      - name: Build app desktop (GTK4, onedir)
+        run: pyinstaller --noconfirm --distpath build/dist --workpath build/gui packaging/ShiniTasks.spec
+
+      - name: Log canh bao PyInstaller cua app
+        if: always()
+        run: |
+          echo "=== warn-ShiniTasks.txt ==="
+          cat build/gui/ShiniTasks/warn-ShiniTasks.txt || true
+          echo "=== cac file DLL chinh trong ban dong goi ==="
+          ls build/dist/ShiniTasks/_internal/ | grep -i -E "gtk|adw|gdk|pango|graphene|cairo" || true
+
+      - name: Kiem thu app — engine chay nen + app tu chup man hinh roi thoat
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "build\dist-engine\ShiniTasksEngine.exe"
+          Start-Sleep -Seconds 3
+          $env:SHINI_TASKS_SNAPSHOT = "$PWD\smoke-board.png"
+          $p = Start-Process -FilePath "build\dist\ShiniTasks\ShiniTasks.exe" -PassThru
+          $ok = $false
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 2
+            if ((Test-Path "smoke-board.png") -and ((Get-Item "smoke-board.png").Length -gt 10000)) { $ok = $true; break }
+            if ($p.HasExited) { "App da thoat som, exit code: $($p.ExitCode)"; break }
+          }
+          taskkill /F /IM ShiniTasks.exe /T 2>$null | Out-Null
+          taskkill /F /IM ShiniTasksEngine.exe /T 2>$null | Out-Null
+          if (-not $ok) { throw "App khong tu chup duoc man hinh — xem buoc Debug phia duoi" }
+          Get-Item "smoke-board.png" | Select-Object Name, Length
+
+      - name: Debug — build ban console, chay bat loi cua app
+        if: failure()
+        run: |
+          SHINI_CONSOLE=1 pyinstaller --noconfirm --distpath build/dbg --workpath build/gui-dbg packaging/ShiniTasks.spec
+          (cd build/dist-engine && ./ShiniTasksEngine.exe &)
+          sleep 3
+          cd build/dbg/ShiniTasks
+          SHINI_TASKS_SNAPSHOT="$PWD/dbg.png" timeout 30 ./ShiniTasks.exe 2>&1 | head -80 || true
+          ls -la
+
+      - name: Gop engine vao thu muc app + dong bo cai Inno Setup
+        shell: pwsh
+        run: |
+          Copy-Item "build\dist-engine\ShiniTasksEngine.exe" "build\dist\ShiniTasks\ShiniTasksEngine.exe"
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install -y innosetup; $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc packaging\ShiniTasks.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup that bai" }
+
+      - name: Tai len artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShiniTasks-Windows
+          path: |
+            build/installer/ShiniTasks-Setup.exe
+            smoke-board.png
+          if-no-files-found: error

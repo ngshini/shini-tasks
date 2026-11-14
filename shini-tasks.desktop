@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Shini Tasks
+GenericName=Quản lý công việc
+Comment=Bảng cột nhắc việc của Sinh — Làm ngay / Hôm nay / Tuần này / Tháng này
+Exec=/usr/bin/python3 /home/croz/shini-tasks/app.py
+Icon=/home/croz/shini-tasks/icon.svg
+Terminal=false
+Categories=Office;ProjectManagement;Calendar;
+StartupWMClass=dev.shini.tasks

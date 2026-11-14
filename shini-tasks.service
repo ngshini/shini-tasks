@@ -1,0 +1,14 @@
+[Unit]
+Description=Shini Tasks - app quan ly viec ca nhan cua Sinh
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/croz/shini-tasks
+ExecStart=/usr/bin/python3 /home/croz/shini-tasks/server.py
+Restart=always
+RestartSec=3
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target

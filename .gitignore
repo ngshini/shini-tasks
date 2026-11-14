@@ -1,0 +1,12 @@
+# Chi dua CODE + file dong goi len repo — du lieu va anh kiem thu o lai may.
+*.png
+*.db
+__pycache__/
+backup-*/
+settings.json
+inbox.txt
+build/
+packaging/shini.ico
+probe.py
+seed_test.py
+dist-windows/

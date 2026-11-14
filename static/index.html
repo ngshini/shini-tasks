@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shini Tasks — Bảng cột nhắc việc</title>
+<style>
+:root{
+  --bg:#060D20; --bg2:#0A1730; --card:#0E1E3E; --card2:#12264C; --line:#1E3A6E;
+  --txt:#EAF2FF; --mut:#8FA8CF; --blue:#2563EB; --cyan:#22D3EE; --red:#F87171; --orange:#FB923C;
+  --violet:#A78BFA; --green:#34D399; --yellow:#FACC15;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;background:
+  radial-gradient(900px 500px at 85% -10%,rgba(37,99,235,.28),transparent 60%),
+  radial-gradient(700px 400px at -10% 110%,rgba(34,211,238,.14),transparent 60%),var(--bg);
+  color:var(--txt);min-height:100vh}
+button{font-family:inherit;cursor:pointer}
+.wrap{max-width:1460px;margin:0 auto;padding:20px 16px 50px}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,var(--blue),var(--cyan));
+  display:grid;place-items:center;font-size:24px;box-shadow:0 8px 24px rgba(37,99,235,.45)}
+h1{font-size:24px} h1 span{color:var(--cyan)}
+.sub{color:var(--mut);font-size:13px;margin-top:2px}
+.head-right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:13px;color:var(--mut)}
+.chip b{color:var(--txt)}
+.btn{background:linear-gradient(135deg,var(--blue),#1D4ED8);color:#fff;border:0;border-radius:12px;
+  padding:10px 16px;font-weight:600;font-size:14px;transition:.15s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(37,99,235,.4)}
+.btn.ghost{background:var(--card);border:1px solid var(--line);color:var(--txt)}
+.btn.small{padding:7px 11px;font-size:13px;border-radius:10px}
+
+/* Thanh "làm trước tiên" gọn */
+.nextbar{margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  background:linear-gradient(120deg,rgba(248,113,113,.16),rgba(37,99,235,.14)),var(--card);
+  border:1px solid rgba(248,113,113,.45);border-radius:16px;padding:12px 16px}
+.nextbar .lab{color:#FCA5A5;font-weight:800;font-size:13px;letter-spacing:1px}
+.nextbar .tt{font-size:19px;font-weight:800}
+.nextbar .mt{color:var(--mut);font-size:13px}
+
+/* Thêm nhanh */
+.quick{margin-top:14px;display:flex;gap:10px}
+.quick input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;color:var(--txt);
+  padding:13px 16px;font-size:15px;outline:none}
+.quick input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.18)}
+.hint{color:var(--mut);font-size:12.5px;margin-top:7px;line-height:1.6}
+.hint code{background:var(--card2);padding:1px 6px;border-radius:6px;color:var(--cyan)}
+
+/* ===== BẢNG CỘT ===== */
+.board{display:flex;gap:12px;margin-top:18px;overflow-x:auto;padding-bottom:10px;align-items:flex-start}
+.col{flex:1 0 248px;max-width:300px;background:rgba(10,23,48,.72);border:1px solid var(--line);
+  border-radius:18px;min-height:300px;display:flex;flex-direction:column;transition:.15s}
+.col.dragover{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.22)}
+.col-head{padding:13px 14px 10px;border-bottom:1px solid var(--line);position:sticky;top:0}
+.col-head .row1{display:flex;align-items:center;gap:8px}
+.col-head .ic{font-size:19px}
+.col-head .nm{font-weight:800;font-size:15px;letter-spacing:.3px}
+.col-head .cnt{margin-left:auto;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+  min-width:28px;text-align:center;border-radius:999px;padding:2px 8px;font-size:13px;font-weight:800}
+.col-head .ds{color:var(--mut);font-size:12px;margin-top:4px;line-height:1.45}
+.col.now{border-top:4px solid var(--red)} .col.today{border-top:4px solid var(--cyan)}
+.col.week{border-top:4px solid var(--blue)} .col.later{border-top:4px solid var(--violet)}
+.col.done{border-top:4px solid var(--green)}
+.col.now .nm{color:#FCA5A5}.col.today .nm{color:#67E8F9}.col.week .nm{color:#93C5FD}
+.col.later .nm{color:#C4B5FD}.col.done .nm{color:#6EE7B7}
+.col-body{padding:10px;display:flex;flex-direction:column;gap:9px;overflow-y:auto;max-height:calc(100vh - 330px);min-height:120px}
+.col-empty{color:var(--mut);font-size:13px;text-align:center;padding:20px 8px;border:1px dashed var(--line);border-radius:12px}
+
+/* Thẻ việc trong cột */
+.task{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:13px;
+  padding:11px 12px;animation:up .22s ease;cursor:grab}
+.task:active{cursor:grabbing}
+.task.dragging{opacity:.45}
+@keyframes up{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
+.task.Q1{border-left-color:var(--red)} .task.Q2{border-left-color:var(--violet)}
+.task.Q3{border-left-color:var(--orange)} .task.Q4{border-left-color:#3B5B8C}
+.task.done{opacity:.55}.task.done .tt{text-decoration:line-through}
+.task .top{display:flex;gap:8px;align-items:flex-start}
+.check{width:23px;height:23px;border-radius:50%;border:2px solid var(--line);background:transparent;flex:none;
+  color:#fff;font-size:12px;margin-top:1px}
+.check:hover{border-color:var(--green)}
+.task.done .check{background:var(--green);border-color:var(--green)}
+.tt{font-size:14.5px;font-weight:650;line-height:1.4;flex:1}
+.acts{display:flex;gap:2px;flex:none}
+.icon-btn{background:transparent;border:0;color:var(--mut);font-size:14px;padding:4px;border-radius:7px}
+.icon-btn:hover{background:var(--card2);color:var(--txt)}
+.meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.pill{font-size:11px;padding:2.5px 8px;border-radius:999px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
+.pill.q1{background:rgba(248,113,113,.16);color:#FCA5A5;border-color:rgba(248,113,113,.4)}
+.pill.q2{background:rgba(167,139,250,.16);color:#C4B5FD;border-color:rgba(167,139,250,.4)}
+.pill.q3{background:rgba(251,146,60,.16);color:#FDBA74;border-color:rgba(251,146,60,.4)}
+.pill.overdue{background:rgba(248,113,113,.25);color:#FECACA;font-weight:700}
+.pill.tag{color:var(--cyan)} .pill.score{color:var(--yellow);border-color:rgba(250,204,21,.35)}
+.pill.doing{background:rgba(251,146,60,.2);color:#FDBA74;font-weight:700}
+.note{color:var(--mut);font-size:12.5px;margin-top:5px;line-height:1.45}
+
+/* Panel dưới bảng */
+.panels{display:grid;grid-template-columns:1.2fr 1fr 1.2fr;gap:12px;margin-top:16px}
+@media(max-width:1000px){.panels{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px}
+.panel h3{font-size:14px;margin-bottom:12px}
+.matrix{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mq{border-radius:14px;padding:11px;border:1px solid var(--line)}
+.mq .n{font-size:23px;font-weight:800}.mq .l{font-size:12px;color:var(--mut);line-height:1.35}
+.mq.q1{background:rgba(248,113,113,.10)}.mq.q2{background:rgba(167,139,250,.10)}
+.mq.q3{background:rgba(251,146,60,.10)}.mq.q4{background:rgba(59,91,140,.16)}
+.ring-row{display:flex;align-items:center;gap:14px}
+.ring{width:74px;height:74px;flex:none}.ring circle{fill:none;stroke-width:9}
+.legend{font-size:13px;color:var(--mut);line-height:1.7}.legend b{color:var(--txt)}
+
+/* Modal */
+.modal{position:fixed;inset:0;background:rgba(3,7,18,.72);display:none;place-items:center;z-index:50;padding:16px}
+.modal.open{display:grid}
+.sheet{background:var(--bg2);border:1px solid var(--line);border-radius:20px;width:560px;max-width:100%;
+  max-height:92vh;overflow:auto;padding:22px}
+.sheet h3{font-size:18px;margin-bottom:14px}
+.f{margin-bottom:12px}.f label{display:block;font-size:13px;color:var(--mut);margin-bottom:6px}
+.f input,.f textarea,.f select{width:100%;background:var(--card);border:1px solid var(--line);border-radius:11px;
+  color:var(--txt);padding:11px 12px;font-size:14.5px;outline:none;font-family:inherit}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tgl{display:flex;gap:8px}
+.tgl button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:11px;padding:10px;font-weight:600}
+.tgl button.on-imp{background:rgba(167,139,250,.22);color:#DDD6FE;border-color:var(--violet)}
+.tgl button.on-urg{background:rgba(248,113,113,.20);color:#FECACA;border-color:var(--red)}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--card2);
+  border:1px solid var(--cyan);color:var(--txt);border-radius:12px;padding:12px 18px;font-size:14px;z-index:99;transition:.3s;opacity:0}
+.toast.show{transform:translateX(-50%);opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">✦</div>
+    <div>
+      <h1>Shini <span>Tasks</span></h1>
+      <div class="sub" id="todayLine">Bảng cột nhắc việc</div>
+    </div>
+    <div class="head-right">
+      <div class="chip">Chưa xong <b id="stOpen">–</b></div>
+      <div class="chip">Hôm nay <b id="stToday">–</b></div>
+      <div class="chip" style="color:#FCA5A5">Quá hạn <b id="stOver">–</b></div>
+      <button class="btn ghost small" id="btnNotify">🔔 Test thông báo</button>
+      <button class="btn small" id="btnNew">＋ Việc mới</button>
+    </div>
+  </header>
+
+  <section class="nextbar" id="nextbar">
+    <span class="lab">⚡ LÀM TRƯỚC TIÊN</span>
+    <span class="tt" id="nextTitle">Đang tải…</span>
+    <span class="mt" id="nextMeta"></span>
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn small" id="btnNextDone">✓ Xong việc này</button>
+      <button class="btn ghost small" id="btnNextEdit">Sửa</button>
+    </span>
+  </section>
+
+  <div class="quick">
+    <input id="quickIn" placeholder="Thêm nhanh: Mai 9h họp team !gấp !quan trọng #work 30p — rồi Enter">
+    <button class="btn" id="btnQuick">Thêm</button>
+  </div>
+  <div class="hint">Việc mới tự rơi vào đúng cột theo ngày hạn + mức ưu tiên. <b style="color:var(--txt)">Kéo thẻ sang cột khác</b> để đổi hạn / đánh dấu xong.
+    Cú pháp nhanh: <code>mai 14h30</code> · <code>thứ 6</code> · <code>20/11</code> · <code>!gấp</code> <code>!quan trọng</code> · <code>#nhãn</code> · <code>45p</code> · <code>nhắc 15p</code></div>
+
+  <main class="board" id="board"></main>
+
+  <div class="panels">
+    <div class="panel">
+      <h3>🎯 Ma trận ưu tiên (Eisenhower)</h3>
+      <div class="matrix">
+        <div class="mq q1"><div class="n" id="mq1">0</div><div class="l"><b>Q1 · Làm ngay</b><br>Gấp + Quan trọng</div></div>
+        <div class="mq q2"><div class="n" id="mq2">0</div><div class="l"><b>Q2 · Lên lịch</b><br>Quan trọng, chưa gấp</div></div>
+        <div class="mq q3"><div class="n" id="mq3">0</div><div class="l"><b>Q3 · Làm nhanh</b><br>Gấp, ít quan trọng</div></div>
+        <div class="mq q4"><div class="n" id="mq4">0</div><div class="l"><b>Q4 · Để sau</b><br>Không gấp, không quan trọng</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>📊 Tiến độ</h3>
+      <div class="ring-row">
+        <svg class="ring" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="33" stroke="#1E3A6E"></circle>
+          <circle id="ringFg" cx="40" cy="40" r="33" stroke="#22D3EE" stroke-linecap="round"
+            stroke-dasharray="207" stroke-dashoffset="207" transform="rotate(-90 40 40)"></circle>
+          <text id="ringTx" x="40" y="46" text-anchor="middle" fill="#EAF2FF" font-size="16" font-weight="800">0%</text>
+        </svg>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>⌨️ Thêm việc từ mọi nơi</h3>
+      <div class="legend">
+        • Phím <b>Alt+E</b>: cửa sổ bắt việc siêu nhanh<br>
+        • API: <b>POST /api/quick</b> {"text":"…"}<br>
+        • Ghi 1 dòng vào <b>inbox.txt</b> trong thư mục dữ liệu — app tự nhặt trong 5 giây<br>
+        • Mở trang này trên điện thoại qua mạng nội bộ / Tailscale
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h3 id="mTitle">Việc mới</h3>
+    <div class="f"><label>Tiêu đề</label><input id="fTitle" placeholder="Việc cần làm…"></div>
+    <div class="f"><label>Ghi chú</label><textarea id="fNotes" rows="2"></textarea></div>
+    <div class="f2">
+      <div class="f"><label>Ngày hạn</label><input id="fDate" type="date"></div>
+      <div class="f"><label>Giờ hạn</label><input id="fTime" type="time"></div>
+    </div>
+    <div class="f2">
+      <div class="f"><label>Mức ưu tiên</label>
+        <div class="tgl">
+          <button id="fImp" type="button">⭐ Quan trọng</button>
+          <button id="fUrg" type="button">🔥 Gấp</button>
+        </div>
+      </div>
+      <div class="f"><label>Nhãn (cách nhau dấu phẩy, tự tạo thoải mái)</label><input id="fTags" placeholder="work, nhà, học…"></div>
+    </div>
+    <div class="f2">
+      <div class="f"><label>Thời lượng ước tính (phút)</label><input id="fEst" type="number" min="0" placeholder="30"></div>
+      <div class="f"><label>Nhắc trước (phút)</label><input id="fRemind" type="number" min="0" value="30"></div>
+    </div>
+    <div class="f2">
+      <div class="f"><label>Lặp lại</label>
+        <select id="fRepeat"><option value="none">Không lặp</option><option value="daily">Mỗi ngày</option>
+        <option value="weekly">Mỗi tuần</option><option value="monthly">Mỗi tháng</option></select></div>
+      <div class="f"><label>Trạng thái</label>
+        <select id="fStatus"><option value="todo">Chưa làm</option><option value="doing">Đang làm</option><option value="done">Đã xong</option></select></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+      <button class="btn ghost" id="mCancel">Hủy</button>
+      <button class="btn" id="mSave">Lưu việc</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+let allTasks=[], stats=null, editing=null;
+
+const COLS=[
+  {id:"now",  ic:"🚨", nm:"LÀM NGAY",        ds:"Quá hạn hoặc Gấp + Quan trọng — xử lý đầu tiên"},
+  {id:"today",ic:"📅", nm:"HÔM NAY",         ds:"Hạn trong hôm nay"},
+  {id:"week", ic:"🗓", nm:"TUẦN NÀY",        ds:"Hạn từ mai đến hết Chủ nhật tuần này"},
+  {id:"later",ic:"🌙", nm:"THÁNG NÀY / ĐỂ SAU", ds:"Hạn trong tháng, xa hơn, hoặc chưa đặt hạn"},
+  {id:"done", ic:"✅", nm:"ĐÃ XONG",         ds:"Việc đã hoàn thành"},
+];
+function dstr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function todayStr(){ return dstr(new Date()); }
+function sundayStr(){ const d=new Date(); d.setDate(d.getDate()+(7-((d.getDay()+6)%7)-1)); return dstr(d); }
+function monthEndStr(){ const d=new Date(); return dstr(new Date(d.getFullYear(), d.getMonth()+1, 0)); }
+
+function isOverdue(t){
+  if(!t.due_date||t.status==="done") return false;
+  const ts=todayStr();
+  if(t.due_date<ts) return true;
+  if(t.due_date===ts && t.due_time){ const n=new Date();
+    return t.due_time < String(n.getHours()).padStart(2,"0")+":"+String(n.getMinutes()).padStart(2,"0"); }
+  return false;
+}
+function bucketOf(t){
+  if(t.status==="done") return "done";
+  if(isOverdue(t) || t.quadrant==="Q1") return "now";
+  if(t.due_date===todayStr()) return "today";
+  if(t.due_date && t.due_date<=sundayStr()) return "week";
+  return "later";
+}
+function fmtDue(t){
+  if(!t.due_date) return "Chưa đặt hạn";
+  const [y,m,d]=t.due_date.split("-").map(Number);
+  const today=new Date(); today.setHours(0,0,0,0);
+  const due=new Date(y,m-1,d); const diff=Math.round((due-today)/86400000);
+  const lbl = diff<0?`Quá hạn ${-diff} ngày`:diff===0?"Hôm nay":diff===1?"Ngày mai":`${String(d).padStart(2,"0")}/${String(m).padStart(2,"0")}`;
+  return lbl+(t.due_time?` · ${t.due_time}`:"");
+}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function qPill(t){
+  return {Q1:'<span class="pill q1">🔥 Q1 · Làm ngay</span>',Q2:'<span class="pill q2">⭐ Q2 · Quan trọng</span>',
+          Q3:'<span class="pill q3">⏱ Q3 · Gấp</span>',Q4:'<span class="pill">Q4 · Để sau</span>'}[t.quadrant];
+}
+function taskHTML(t){
+  const over=isOverdue(t);
+  return `<div class="task ${t.quadrant} ${t.status==="done"?"done":""}" draggable="true" data-id="${t.id}">
+    <div class="top">
+      <button class="check" data-act="toggle" data-id="${t.id}">${t.status==="done"?"✓":""}</button>
+      <div class="tt">${esc(t.title)}</div>
+      <div class="acts">
+        <button class="icon-btn" data-act="edit" data-id="${t.id}" title="Sửa">✎</button>
+        <button class="icon-btn" data-act="del" data-id="${t.id}" title="Xóa">🗑</button>
+      </div>
+    </div>
+    ${t.notes?`<div class="note">${esc(t.notes)}</div>`:""}
+    <div class="meta">
+      ${qPill(t)}
+      <span class="pill ${over?"overdue":""}">📅 ${fmtDue(t)}</span>
+      ${t.status==="doing"?'<span class="pill doing">▶ Đang làm</span>':""}
+      ${t.estimate_min?`<span class="pill">~${t.estimate_min} phút</span>`:""}
+      ${t.repeat_rule&&t.repeat_rule!=="none"?`<span class="pill">🔁 ${{daily:"mỗi ngày",weekly:"mỗi tuần",monthly:"mỗi tháng"}[t.repeat_rule]}</span>`:""}
+      ${(t.tags||[]).map(x=>`<span class="pill tag">#${esc(x)}</span>`).join("")}
+      ${t.status!=="done"?`<span class="pill score">điểm ${t.score}</span>`:""}
+    </div></div>`;
+}
+function render(){
+  const by={now:[],today:[],week:[],later:[],done:[]};
+  for(const t of allTasks) by[bucketOf(t)].push(t);
+  by.done.sort((a,b)=>String(b.done_at||"").localeCompare(String(a.done_at||"")));
+  $("#board").innerHTML=COLS.map(c=>`
+    <section class="col ${c.id}" data-col="${c.id}">
+      <div class="col-head"><div class="row1"><span class="ic">${c.ic}</span><span class="nm">${c.nm}</span>
+        <span class="cnt">${by[c.id].length}</span></div><div class="ds">${c.ds}</div></div>
+      <div class="col-body" data-col="${c.id}">
+        ${by[c.id].length?by[c.id].map(taskHTML).join(""):`<div class="col-empty">Chưa có việc nào</div>`}
+      </div>
+    </section>`).join("");
+  bindDrag();
+  const next=stats?.next?.[0];
+  if(next){
+    $("#nextTitle").textContent=next.title;
+    $("#nextMeta").textContent=`${fmtDue(next)} · ${next.quadrant} · điểm ${next.score}`+(next.estimate_min?` · ~${next.estimate_min} phút`:"");
+    $("#btnNextDone").onclick=()=>toggleDone(next);
+    $("#btnNextEdit").onclick=()=>openEdit(next);
+  } else {
+    $("#nextTitle").textContent="Không còn việc nào đang chờ 🎉";
+    $("#nextMeta").textContent=""; $("#btnNextDone").onclick=null; $("#btnNextEdit").onclick=null;
+  }
+  $("#stOpen").textContent=stats?.open??"–";
+  $("#stToday").textContent=stats?.due_today??"–";
+  $("#stOver").textContent=stats?.overdue??"–";
+  for(let i=1;i<=4;i++) $("#mq"+i).textContent=stats?.by_quadrant?.["Q"+i]??0;
+  const total=(stats?.open||0)+(stats?.done_total||0);
+  const pct=total?Math.round(stats.done_total/total*100):0;
+  $("#ringFg").style.strokeDashoffset=207-207*pct/100;
+  $("#ringTx").textContent=pct+"%";
+  $("#legend").innerHTML=`Đã xong <b>${stats?.done_total??0}</b> / tổng <b>${total}</b> việc<br>Đang chờ <b>${stats?.open??0}</b> việc<br>Đến hạn hôm nay <b>${stats?.due_today??0}</b>`;
+}
+async function load(){
+  const [a,b,c]=await Promise.all([fetch("/api/tasks?view=all"),fetch("/api/tasks?view=done"),fetch("/api/stats")]);
+  allTasks=[...(await a.json()).tasks||[], ...(await b.json()).tasks||[]];
+  stats=await c.json(); render();
+}
+async function toggleDone(t){
+  await fetch(`/api/tasks/${t.id}/${t.status==="done"?"reopen":"done"}`,{method:"POST"});
+  toast(t.status==="done"?"Đã mở lại việc":"✓ Đã xong một việc!"); load();
+}
+async function act(kind,id){
+  const t=allTasks.find(x=>x.id===id);
+  if(kind==="toggle"&&t) return toggleDone(t);
+  if(kind==="del"){ if(confirm("Xóa việc này?")) await fetch(`/api/tasks/${id}`,{method:"DELETE"}); else return; }
+  load();
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-act]"); if(!b) return;
+  const id=Number(b.dataset.id);
+  if(b.dataset.act==="edit"){ const t=allTasks.find(x=>x.id===id); if(t) openEdit(t); }
+  else act(b.dataset.act,id);
+});
+/* Kéo thả giữa các cột */
+let dragId=null;
+function bindDrag(){
+  document.querySelectorAll(".task").forEach(el=>{
+    el.addEventListener("dragstart",e=>{ dragId=Number(el.dataset.id); el.classList.add("dragging");
+      e.dataTransfer.effectAllowed="move"; });
+    el.addEventListener("dragend",()=>el.classList.remove("dragging"));
+  });
+  document.querySelectorAll(".col").forEach(col=>{
+    col.addEventListener("dragover",e=>{ e.preventDefault(); col.classList.add("dragover"); });
+    col.addEventListener("dragleave",()=>col.classList.remove("dragover"));
+    col.addEventListener("drop",async e=>{
+      e.preventDefault(); col.classList.remove("dragover");
+      const t=allTasks.find(x=>x.id===dragId); if(!t) return;
+      const target=col.dataset.col, cur=bucketOf(t);
+      if(target===cur) return;
+      if(target==="done"){ return toggleDone(t); }
+      if(t.status==="done") await fetch(`/api/tasks/${t.id}/reopen`,{method:"POST"});
+      if(target==="now") await patch(t.id,{important:true,urgent:true});
+      if(target==="today") await patch(t.id,{due_date:todayStr()});
+      if(target==="week") await patch(t.id,{due_date:sundayStr()});
+      if(target==="later") await patch(t.id,{due_date:monthEndStr()});
+      toast("Đã chuyển cột ✓"); load();
+    });
+  });
+}
+async function patch(id,body){
+  await fetch(`/api/tasks/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+}
+async function quickAdd(){
+  const v=$("#quickIn").value.trim(); if(!v) return;
+  const r=await fetch("/api/quick",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:v,source:"web"})});
+  if(r.ok){ $("#quickIn").value=""; toast("Đã thêm việc ✓"); load(); } else toast("Thêm chưa được, thử lại nhé");
+}
+$("#btnQuick").onclick=quickAdd;
+$("#quickIn").addEventListener("keydown",e=>{ if(e.key==="Enter") quickAdd(); });
+$("#btnNotify").onclick=async()=>{ await fetch("/api/notify-test",{method:"POST"}); toast("Đã gửi thông báo thử lên desktop Linux"); };
+
+let imp=false, urg=false;
+function setTgl(){ $("#fImp").className=imp?"on-imp":""; $("#fUrg").className=urg?"on-urg":""; }
+$("#fImp").onclick=()=>{imp=!imp;setTgl()}; $("#fUrg").onclick=()=>{urg=!urg;setTgl()};
+function openEdit(t){
+  editing=t||null; imp=!!t?.important; urg=!!t?.urgent; setTgl();
+  $("#mTitle").textContent=t?"Sửa việc":"Việc mới";
+  $("#fTitle").value=t?.title||""; $("#fNotes").value=t?.notes||"";
+  $("#fDate").value=t?.due_date||""; $("#fTime").value=t?.due_time||"";
+  $("#fTags").value=(t?.tags||[]).join(", "); $("#fEst").value=t?.estimate_min||"";
+  $("#fRemind").value=t?.remind_before??30; $("#fRepeat").value=t?.repeat_rule||"none";
+  $("#fStatus").value=t?.status||"todo";
+  $("#modal").classList.add("open");
+}
+$("#btnNew").onclick=()=>openEdit(null);
+$("#btnNextEdit").onclick=()=>{};
+$("#mCancel").onclick=()=>$("#modal").classList.remove("open");
+$("#modal").addEventListener("click",e=>{ if(e.target.id==="modal") $("#modal").classList.remove("open"); });
+$("#mSave").onclick=async()=>{
+  const body={title:$("#fTitle").value.trim(),notes:$("#fNotes").value,due_date:$("#fDate").value||null,
+    due_time:$("#fTime").value||null,important:imp,urgent:urg,
+    tags:$("#fTags").value.split(",").map(s=>s.trim()).filter(Boolean),
+    estimate_min:$("#fEst").value?Number($("#fEst").value):null,
+    remind_before:Number($("#fRemind").value||30),repeat_rule:$("#fRepeat").value,status:$("#fStatus").value};
+  if(!body.title){ toast("Chưa có tiêu đề việc"); return; }
+  if(editing) await patch(editing.id,body);
+  else await fetch("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  $("#modal").classList.remove("open"); toast("Đã lưu ✓"); load();
+};
+let toastTimer;
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2600); }
+
+const now=new Date();
+$("#todayLine").textContent=now.toLocaleDateString("vi-VN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})+" — nhìn một cái là biết việc nào làm trước";
+load(); setInterval(load,30000);
+</script>
+</body>
+</html>
