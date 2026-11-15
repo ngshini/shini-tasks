@@ -492,6 +492,16 @@ button.slot.drop-hover { background: rgba(86,156,214,.25); }
 .today-cnt { color: #F78C6C; font-weight: 700; }
 .statcard { background: #262B36; border: 1px solid #333A48; border-radius: 14px; padding: 12px 14px; }
 .statnum { font-size: 23px; font-weight: 800; color: #EDEDED; }
+/* ===== NÚT 'CHỈ QUÁ HẠN' (Sinh 2026-11-15: bật lọc thì MẤT MÀU CHỮ) =====
+   Nút này trước đây KHÔNG có class riêng nên trạng thái :checked/:hover mượn
+   style của theme hệ thống Sweet (nền đen + chữ đen -> chữ biến mất). Nay ghim
+   cứng mọi trạng thái, cả nhãn con bên trong, theo đúng thang màu của app. */
+button.overbtn { background: #343B4D; color: #EDEDED; border: 1px solid #333A48; }
+button.overbtn > label { color: #EDEDED; }
+button.overbtn:hover { background: #3E465C; }
+button.overbtn:checked { background: #0E639C; color: #FFFFFF; border-color: #0E639C; }
+button.overbtn:checked > label { color: #FFFFFF; }
+button.overbtn:checked:hover { background: #1177BB; }
 """
 
 LIGHT_CSS = """
@@ -662,6 +672,15 @@ button.slot.drop-hover { background: rgba(37,99,235,.14); }
 .today-cnt { color: #C2410C; font-weight: 700; }
 .statcard { background: #FFFFFF; border: 1px solid #E0E0DC; border-radius: 14px; padding: 12px 14px; }
 .statnum { font-size: 23px; font-weight: 800; color: #111111; }
+/* ===== NÚT 'CHỈ QUÁ HẠN' (Sinh 2026-11-15: bật lọc thì MẤT MÀU CHỮ) =====
+   Như bản tối: ghim cứng mọi trạng thái + nhãn con. Đang bật lọc = nền đen
+   chữ trắng (cùng quy ước với nút chọn mức ưu tiên trong hộp sửa việc). */
+button.overbtn { background: #FFFFFF; color: #171717; border: 1px solid #D4D4D0; }
+button.overbtn > label { color: #171717; }
+button.overbtn:hover { background: #F0F0EE; }
+button.overbtn:checked { background: #171717; color: #FFFFFF; border-color: #171717; }
+button.overbtn:checked > label { color: #FFFFFF; }
+button.overbtn:checked:hover { background: #2A2A2A; }
 """
 
 def api(method, path, body=None):
@@ -1813,6 +1832,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sort_drop.connect("notify::selected", self._on_sort)
         tb.append(self.sort_drop)
         self.over_btn = Gtk.ToggleButton(label="⚠ Chỉ quá hạn")
+        self.over_btn.add_css_class("overbtn")
         self.over_btn.connect("toggled", self._on_over)
         tb.append(self.over_btn)
         self.filter_lab = Gtk.Label(label=""); self.filter_lab.add_css_class("mut")
