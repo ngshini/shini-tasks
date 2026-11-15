@@ -2093,7 +2093,7 @@ class MainWindow(Adw.ApplicationWindow):
         note = Gtk.Label(label="Thêm việc từ mọi nơi:\n• Alt+E: bắt việc siêu nhanh (tự điền chữ vừa copy)\n"
                                f"• Ghi mỗi việc 1 dòng vào file:\n  {_inbox_path}\n"
                                "• API: POST /api/quick (cổng 8790)\n"
-                               "Shini Tasks v1.1.0 · App tự cập nhật mỗi 5 giây.", xalign=0)
+                               "Shini Tasks v1.1.1 · App tự cập nhật mỗi 5 giây.", xalign=0)
         note.set_wrap(True)
         note.add_css_class("sb-note"); sb.append(note)
         return sb

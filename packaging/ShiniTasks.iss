@@ -7,7 +7,7 @@
 [Setup]
 AppId={{9D4F2A71-3C8E-4B5A-A6D1-2E7F8B0C4D55}
 AppName=Shini Tasks
-AppVersion=1.1.0
+AppVersion=1.1.1
 AppPublisher=Shini Web
 DefaultDirName={autopf}\Shini Tasks
 DefaultGroupName=Shini Tasks
