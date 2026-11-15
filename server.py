@@ -98,6 +98,12 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS columns(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL, color TEXT DEFAULT '#60A5FA', position INTEGER DEFAULT 0)""")
+        # --- Lưu trữ việc đã xong bị TỰ XOÁ sau 15 ngày (Sinh 2026-11-15):
+        #     chỉ giữ bản ghi nhẹ để THỐNG KÊ vẫn tính đủ như chưa xoá ---
+        c.execute("""CREATE TABLE IF NOT EXISTS done_archive(
+            id INTEGER PRIMARY KEY, title TEXT, column_id INTEGER,
+            due_date TEXT, due_time TEXT, estimate_min INTEGER,
+            done_at TEXT, created_at TEXT, archived_at TEXT)""")
         cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
         if "column_id" not in cols:
             c.execute("ALTER TABLE tasks ADD COLUMN column_id INTEGER")
@@ -484,6 +490,26 @@ def inbox_loop():
             print("inbox error:", e, flush=True)
         time.sleep(5)
 
+def purge_old_done():
+    """Tự xoá việc ĐÃ XONG quá 15 ngày khỏi bảng tasks (Sinh 2026-11-15) —
+    trước khi xoá, chép bản ghi nhẹ sang done_archive để thống kê (streak,
+    tổng đã xong, đúng hạn, theo cột) vẫn tính đủ như chưa xoá."""
+    cutoff = (date.today() - timedelta(days=15)).isoformat()
+    n = 0
+    with db() as c:
+        rows = c.execute("SELECT * FROM tasks WHERE status='done' AND done_at IS NOT NULL "
+                         "AND substr(done_at,1,10) < ?", (cutoff,)).fetchall()
+        for r in rows:
+            c.execute("""INSERT OR REPLACE INTO done_archive(id,title,column_id,due_date,due_time,
+                         estimate_min,done_at,created_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                      (r["id"], r["title"], r["column_id"], r["due_date"], r["due_time"],
+                       r["estimate_min"], r["done_at"], r["created_at"],
+                       datetime.now().isoformat(timespec="seconds")))
+            c.execute("DELETE FROM tasks WHERE id=?", (r["id"],))
+            n += 1
+    if n: print(f"purge: da xoa {n} viec xong qua 15 ngay (van tinh trong thong ke)", flush=True)
+    return n
+
 def backup_loop():
     """Sao lưu tasks.db MỖI NGÀY vào thư mục backups/ (giữ 14 bản gần nhất).
     Dùng API backup của SQLite nên an toàn ngay cả khi DB đang được ghi."""
@@ -504,6 +530,17 @@ def backup_loop():
                     os.remove(os.path.join(bdir, old))
         except Exception as e:
             print("backup error:", e, flush=True)
+        # Tự xoá việc đã xong quá 15 ngày — 1 lần/ngày (đánh dấu trong meta)
+        try:
+            key = "purge_" + date.today().isoformat()
+            with db() as c:
+                purged_today = c.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
+            if not purged_today:
+                purge_old_done()
+                with db() as c:
+                    c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (key, "1"))
+        except Exception as e:
+            print("purge error:", e, flush=True)
         time.sleep(3600)
 
 # ---------- HTTP ----------
@@ -598,6 +635,12 @@ class H(BaseHTTPRequestHandler):
             # Xem trước cách app hiểu câu thêm nhanh (không tạo việc) — kiểu Todoist
             text = (parse_qs(u.query).get("text", [""])[0] or "").strip()
             return self._json({"parsed": parse_quick(text) if text else None})
+        if u.path == "/api/done-archive":
+            # Việc đã xong bị tự xoá sau 15 ngày — bản ghi nhẹ cho thống kê
+            with db() as c:
+                rows = c.execute("SELECT id,title,column_id,due_date,due_time,estimate_min,"
+                                 "done_at,created_at FROM done_archive ORDER BY done_at").fetchall()
+            return self._json({"tasks": [dict(r, status="done", subtasks=[]) for r in rows]})
         if u.path == "/api/stats":
             now = datetime.now(); today = date.today().isoformat()
             with db() as c:
@@ -609,6 +652,12 @@ class H(BaseHTTPRequestHandler):
             for t in rows:
                 if t["status"] == "done" and t.get("done_at"):
                     done_days[t["done_at"][:10]] = done_days.get(t["done_at"][:10], 0) + 1
+            # Gộp cả việc đã tự xoá sau 15 ngày (done_archive) — thống kê không đổi
+            with db() as c:
+                arch_rows = c.execute("SELECT done_at FROM done_archive").fetchall()
+            for r in arch_rows:
+                if r["done_at"]:
+                    done_days[r["done_at"][:10]] = done_days.get(r["done_at"][:10], 0) + 1
             streak, cur = 0, date.today()
             if done_days.get(cur.isoformat(), 0) == 0: cur -= timedelta(days=1)
             while done_days.get(cur.isoformat(), 0) > 0:
@@ -629,7 +678,8 @@ class H(BaseHTTPRequestHandler):
                                   "oldest_days": (date.today() - date.fromisoformat(oldest)).days})
             stale.sort(key=lambda x: -x["oldest_days"])
             return self._json({
-                "open": len(open_), "done_total": len(rows) - len(open_),
+                "open": len(open_), "done_total": len(rows) - len(open_) + len(arch_rows),
+                "archived_done": len(arch_rows),
                 "due_today": len([t for t in open_ if t["due_date"] == today]),
                 "overdue": len([t for t in open_ if t["due_date"] and t["due_date"] < today]),
                 "next": sorted(open_, key=lambda x: -x["score"])[:3],
@@ -707,6 +757,9 @@ class H(BaseHTTPRequestHandler):
             d = self._body()
             ins = upd = skip = 0
             with db() as c:
+                # Việc đã TỰ XOÁ sau 15 ngày (có trong done_archive) không được
+                # hồi sinh qua đồng bộ/khôi phục từ máy khác
+                arch_ids = {r["id"] for r in c.execute("SELECT id FROM done_archive").fetchall()}
                 for col in d.get("columns") or []:
                     cur = c.execute("SELECT id FROM columns WHERE id=?", (col["id"],)).fetchone()
                     if cur:
@@ -716,6 +769,8 @@ class H(BaseHTTPRequestHandler):
                         c.execute("INSERT INTO columns(id, name, color, position) VALUES(?,?,?,?)",
                                   (col["id"], col["name"], col.get("color", "#60A5FA"), col.get("position", 0)))
                 for t in d.get("tasks") or []:
+                    if t.get("status") == "done" and t.get("id") in arch_ids:
+                        skip += 1; continue
                     cur = c.execute("SELECT updated_at FROM tasks WHERE id=?", (t["id"],)).fetchone()
                     subs = t.get("subtasks") or []
                     if not isinstance(subs, str): subs = json.dumps(subs, ensure_ascii=False)

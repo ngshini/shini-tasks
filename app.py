@@ -1738,6 +1738,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sb_nums = {}
         self.level_labels = {}
         self.all_tasks = []
+        self.done_archive = []
         self.columns = []
         self.stats = {}
         self.q_text = ""
@@ -2093,7 +2094,7 @@ class MainWindow(Adw.ApplicationWindow):
         note = Gtk.Label(label="Thêm việc từ mọi nơi:\n• Alt+E: bắt việc siêu nhanh (tự điền chữ vừa copy)\n"
                                f"• Ghi mỗi việc 1 dòng vào file:\n  {_inbox_path}\n"
                                "• API: POST /api/quick (cổng 8790)\n"
-                               "Shini Tasks v1.1.1 · App tự cập nhật mỗi 5 giây.", xalign=0)
+                               "Shini Tasks v1.2.0 · App tự cập nhật mỗi 5 giây.", xalign=0)
         note.set_wrap(True)
         note.add_css_class("sb-note"); sb.append(note)
         return sb
@@ -2218,7 +2219,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.all_tasks = open_ + done
         self.stats = stats
         self.columns = columns
-        h = json.dumps([self.all_tasks, stats, columns, SETTINGS, self.q_text, self.f_tag,
+        try: self.done_archive = api("GET", "/api/done-archive")["tasks"]
+        except Exception: pass   # engine cũ chưa có endpoint này — giữ bản đã có
+        h = json.dumps([self.all_tasks, self.done_archive, stats, columns, SETTINGS, self.q_text, self.f_tag,
                         self.f_overdue, self.f_date, self.sort_mode], sort_keys=True, ensure_ascii=False)
         if maybe and h == self._last_hash: return
         self._last_hash = h
@@ -2451,7 +2454,7 @@ class MainWindow(Adw.ApplicationWindow):
         s = self.stats
         tasks = self.all_tasks
         today = today_()
-        done_tasks = [t for t in tasks if t["status"] == "done"]
+        done_tasks = [t for t in tasks if t["status"] == "done"] + list(getattr(self, "done_archive", []))
         with_due = [t for t in done_tasks if t.get("due_date") and t.get("done_at")]
         ontime = len([t for t in with_due if t["done_at"][:10] <= t["due_date"]])
         late = [t for t in with_due if t["done_at"][:10] > t["due_date"]]
@@ -2495,6 +2498,8 @@ class MainWindow(Adw.ApplicationWindow):
         elif with_due: notes.append("🎯 Mọi việc có hạn đã xong đều đúng hạn — tốt lắm!")
         open_est = sum(t.get("estimate_min") or 60 for t in tasks if t["status"] != "done")
         notes.append(f"🕐 Tổng thời lượng ước tính của việc đang mở: ~{open_est // 60} giờ {open_est % 60} phút (ước lượng — đo thời gian thật thuộc hướng A).")
+        na = s.get("archived_done") or 0
+        if na: notes.append(f"🧹 Đã tự xoá {na} việc xong quá 15 ngày khỏi bảng — vẫn tính đầy đủ trong thống kê này.")
         nl = Gtk.Label(label="\n".join(notes), xalign=0, wrap=True); nl.add_css_class("mut"); box.append(nl)
         brow = Gtk.Box(spacing=8)
         bexp = Gtk.Button(label="📸 Xuất báo cáo tuần (PNG)"); bexp.add_css_class("suggested-action")

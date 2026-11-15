@@ -3,7 +3,7 @@
 Bảng cột nhắc việc chạy **ngay trên máy của bạn**: dữ liệu lưu local (SQLite),
 không tài khoản, không đám mây, không gửi gì ra ngoài.
 
-![Phiên bản](https://img.shields.io/badge/version-1.1.1-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
+![Phiên bản](https://img.shields.io/badge/version-1.2.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
 
 ## Cài đặt
 
@@ -25,6 +25,7 @@ Cần Python 3 + GTK4 + Libadwaita (PyGObject). Chạy engine `python3 server.py
 - **Việc lặp nâng cao**: mỗi ngày/tuần/tháng, lặp theo thứ (T2, T4, T6…), giới hạn số lần; việc con tự reset mỗi lần lặp.
 - **Nhắc việc**: thông báo trước hạn, quá hạn 30 phút nhắc lại mức khẩn, bản tin 07:30 sáng + xem trước 20:30 tối.
 - **Đồng bộ 2 máy** (cùng mạng/Tailscale) và xuất/nhập JSON; engine tự sao lưu database mỗi ngày (giữ 14 bản).
+- **Tự dọn dẹp**: việc đã xong quá 15 ngày tự xoá khỏi bảng cho gọn — nhưng vẫn tính đầy đủ trong thống kê (chuỗi ngày, đúng hạn, theo cột).
 
 ## Thêm việc siêu nhanh
 - **Alt+E** ở bất kỳ đâu: cửa sổ bắt việc — dán một đoạn chữ, một danh sách nhiều dòng, hay một câu tự nhiên đều được.
