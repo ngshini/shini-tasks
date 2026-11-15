@@ -53,6 +53,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
+VERSION = "1.2.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -1773,7 +1774,12 @@ class MainWindow(Adw.ApplicationWindow):
         b_side = Gtk.Button(label="☰"); b_side.add_css_class("hdrbtn")
         b_side.set_tooltip_text("Ẩn / hiện toàn bộ thanh bên (Ctrl+B)")
         b_side.connect("clicked", lambda *_: self._toggle_sidebar())
-        hb.pack_start(b_side); hb.pack_start(self.theme_btn); hb.pack_end(b_new); hb.pack_end(b_cap)
+        self.upd_btn = Gtk.Button(label=""); self.upd_btn.add_css_class("suggested-action")
+        self.upd_btn.set_visible(False)
+        self.upd_btn.set_tooltip_text("Có bản Shini Tasks mới — bấm để mở trang tải về")
+        self.upd_btn.connect("clicked", self._open_update)
+        hb.pack_start(b_side); hb.pack_start(self.theme_btn)
+        hb.pack_end(b_new); hb.pack_end(b_cap); hb.pack_end(self.upd_btn)
         root.append(hb)
 
         body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
@@ -2094,7 +2100,7 @@ class MainWindow(Adw.ApplicationWindow):
         note = Gtk.Label(label="Thêm việc từ mọi nơi:\n• Alt+E: bắt việc siêu nhanh (tự điền chữ vừa copy)\n"
                                f"• Ghi mỗi việc 1 dòng vào file:\n  {_inbox_path}\n"
                                "• API: POST /api/quick (cổng 8790)\n"
-                               "Shini Tasks v1.2.0 · App tự cập nhật mỗi 5 giây.", xalign=0)
+                               f"Shini Tasks v{VERSION} · App tự cập nhật mỗi 5 giây.", xalign=0)
         note.set_wrap(True)
         note.add_css_class("sb-note"); sb.append(note)
         return sb
@@ -2219,6 +2225,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.all_tasks = open_ + done
         self.stats = stats
         self.columns = columns
+        if stats.get("update_available"):
+            self.upd_btn.set_label(f"⬆ Bản mới {stats.get('latest_version', '')}")
+            self.upd_btn.set_visible(True)
+        else:
+            self.upd_btn.set_visible(False)
         try: self.done_archive = api("GET", "/api/done-archive")["tasks"]
         except Exception: pass   # engine cũ chưa có endpoint này — giữ bản đã có
         h = json.dumps([self.all_tasks, self.done_archive, stats, columns, SETTINGS, self.q_text, self.f_tag,
@@ -2226,6 +2237,12 @@ class MainWindow(Adw.ApplicationWindow):
         if maybe and h == self._last_hash: return
         self._last_hash = h
         self._render()
+
+    def _open_update(self, *_):
+        url = (self.stats or {}).get("latest_url")
+        if url:
+            try: Gtk.UriLauncher(uri=url).launch(None, None, None)
+            except Exception: pass
 
     def _render_error(self):
         self._board_structure = None; self._board_cache = {}

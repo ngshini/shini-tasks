@@ -11,6 +11,7 @@ from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+VERSION = "1.2.1"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
 TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
@@ -510,6 +511,45 @@ def purge_old_done():
     if n: print(f"purge: da xoa {n} viec xong qua 15 ngay (van tinh trong thong ke)", flush=True)
     return n
 
+def _ver_newer(a, b):
+    """True nếu phiên bản a mới hơn b (dạng '1.2.3')."""
+    try:
+        return [int(x) for x in a.split(".")] > [int(x) for x in b.split(".")]
+    except Exception:
+        return a != b
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+def _check_update():
+    """Kiểm tra bản mới trên GitHub Releases — chỉ TẢI thông tin công khai,
+    không gửi dữ liệu người dùng nào đi. Kết quả lưu vào meta cho /api/stats.
+    Trả True nếu lấy được phiên bản mới nhất.
+    Cách làm: đọc thẻ chuyển hướng của địa chỉ /releases/latest (trang web
+    GitHub tự nhảy tới bản mới nhất) — KHÔNG dùng REST API vì API giới hạn
+    60 lượt/giờ theo IP, người dùng sau NAT chung (rất phổ biến ở VN) sẽ bị
+    chặn oan; đường trang web thì không bị giới hạn đó."""
+    try:
+        req = urllib.request.Request(
+            "https://github.com/ngshini/shini-tasks/releases/latest",
+            headers={"User-Agent": "ShiniTasks/" + VERSION})
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            opener.open(req, timeout=10)
+            return False   # không chuyển hướng = không đọc được gì
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location") or ""
+        if "/tag/" not in loc: return False
+        tag = loc.rstrip("/").split("/tag/")[-1].lstrip("v")
+        if not tag: return False
+        with db() as c:
+            c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('latest_version',?)", (tag,))
+            c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('latest_url',?)", (loc,))
+        return True
+    except Exception:
+        return False   # không có mạng / GitHub bận — lát nữa kiểm tra lại
+
 def backup_loop():
     """Sao lưu tasks.db MỖI NGÀY vào thư mục backups/ (giữ 14 bản gần nhất).
     Dùng API backup của SQLite nên an toàn ngay cả khi DB đang được ghi."""
@@ -541,6 +581,17 @@ def backup_loop():
                     c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (key, "1"))
         except Exception as e:
             print("purge error:", e, flush=True)
+        # Kiểm tra bản mới trên GitHub — 1 lần/ngày (đánh dấu trong meta)
+        try:
+            key = "updcheck_" + date.today().isoformat()
+            with db() as c:
+                checked_today = c.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
+            if not checked_today:
+                if _check_update():   # chỉ đánh dấu 'đã kiểm tra hôm nay' khi lấy được thật
+                    with db() as c:
+                        c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", (key, "1"))
+        except Exception:
+            pass
         time.sleep(3600)
 
 # ---------- HTTP ----------
@@ -677,9 +728,16 @@ class H(BaseHTTPRequestHandler):
                     stale.append({"column": nm, "open": len(copen),
                                   "oldest_days": (date.today() - date.fromisoformat(oldest)).days})
             stale.sort(key=lambda x: -x["oldest_days"])
+            with db() as c:
+                mrows = {r["k"]: r["v"] for r in c.execute(
+                    "SELECT k,v FROM meta WHERE k IN ('latest_version','latest_url')").fetchall()}
+            latest_ver = mrows.get("latest_version") or ""
             return self._json({
                 "open": len(open_), "done_total": len(rows) - len(open_) + len(arch_rows),
                 "archived_done": len(arch_rows),
+                "version": VERSION, "latest_version": latest_ver,
+                "update_available": bool(latest_ver) and _ver_newer(latest_ver, VERSION),
+                "latest_url": mrows.get("latest_url") or "",
                 "due_today": len([t for t in open_ if t["due_date"] == today]),
                 "overdue": len([t for t in open_ if t["due_date"] and t["due_date"] < today]),
                 "next": sorted(open_, key=lambda x: -x["score"])[:3],
