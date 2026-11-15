@@ -53,7 +53,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.4.0"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.4.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -2540,6 +2540,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.board.set_hexpand(True)
         self.board.set_margin_start(14); self.board.set_margin_end(14); self.board.set_margin_bottom(14)
         scroll.set_child(self.board)
+        # Thanh báo TẬP TRUNG CỘT — chỉ hiện khi đang focus đúng 1 cột.
+        # Trước đây bấm tên cột ở sidebar là bảng thu về 1 cột mà chỉ có một
+        # dòng chữ nhỏ "Đang lọc…" ở thanh công cụ báo hiệu; Sinh bấm phải,
+        # tưởng bảng hỏng vì không thấy các cột như cũ (2026-11-16 00:55).
+        # Nay có thanh riêng + nút thoát rõ ràng ngay trên bảng.
+        self.focus_bar = Gtk.Box(spacing=10)
+        self.focus_bar.set_margin_start(14); self.focus_bar.set_margin_end(14)
+        self.focus_bar.set_margin_bottom(8)
+        self.focus_lab = Gtk.Label(label="", xalign=0); self.focus_lab.add_css_class("today-h")
+        self.focus_bar.append(self.focus_lab)
+        unf = Gtk.Button(label="✕ Xem tất cả cột"); unf.add_css_class("dlgbtn")
+        unf.connect("clicked", lambda *_: self._set_focus(self.focus_col))
+        self.focus_bar.append(unf)
+        self.focus_bar.set_visible(False)
+        board_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        board_page.append(self.focus_bar); board_page.append(scroll)
         # Trang LỊCH (lưới thời gian kiểu Google Calendar)
         cal_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         cal_page.set_margin_start(14); cal_page.set_margin_end(14)
@@ -2588,7 +2604,7 @@ class MainWindow(Adw.ApplicationWindow):
         stats_scroll.set_child(stats_outer)
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True); self.stack.set_margin_top(12)
-        self.stack.add_named(scroll, "board")
+        self.stack.add_named(board_page, "board")
         self.stack.add_named(cal_page, "calendar")
         self.stack.add_named(today_scroll, "today")
         self.stack.add_named(stats_scroll, "stats")
@@ -3111,14 +3127,17 @@ class MainWindow(Adw.ApplicationWindow):
         bits = []
         smart_names = {k: lbl for k, _i, _c, lbl in self.SMART_DEFS}
         if self.smart != "all": bits.append(f"mục {smart_names.get(self.smart, '')}")
-        if self.focus_col is not None:
-            fc = next((c["name"] for c in self.columns if c["id"] == self.focus_col), "")
-            bits.append(f"chỉ cột “{fc}” (bấm lại tên cột ở sidebar để bỏ)")
         if self.q_text: bits.append(f"tìm “{self.q_text}”")
         if self.f_tag: bits.append(f"nhãn #{self.f_tag}")
         if self.f_overdue: bits.append("chỉ quá hạn")
         if self.f_date: bits.append(f"ngày {self.f_date[8:10]}/{self.f_date[5:7]} (bấm lại ngày đó để bỏ lọc)")
         self.filter_lab.set_text(("Đang lọc: " + " · ".join(bits)) if bits else "")
+        if self.focus_col is not None:
+            fc = next((c["name"] for c in self.columns if c["id"] == self.focus_col), "")
+            self.focus_lab.set_text(f"📌 Đang chỉ xem cột: {fc}")
+            self.focus_bar.set_visible(True)
+        else:
+            self.focus_bar.set_visible(False)
 
         col_ids = [c["id"] for c in self._board_cols]
         first_id = col_ids[0] if col_ids else None
