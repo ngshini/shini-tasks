@@ -4,7 +4,7 @@ Bảng cột nhắc việc chạy **ngay trên máy của bạn**: dữ liệu l
 không tài khoản, không đám mây. Dữ liệu của bạn không bao giờ rời máy — app chỉ
 tự kiểm tra bản mới trên GitHub mỗi ngày một lần (không gửi kèm dữ liệu cá nhân nào).
 
-![Phiên bản](https://img.shields.io/badge/version-1.3.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
+![Phiên bản](https://img.shields.io/badge/version-1.4.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
 
 ## Cài đặt
 
@@ -19,13 +19,18 @@ Cần Python 3 + GTK4 + Libadwaita (PyGObject). Chạy engine `python3 server.py
 (nên đặt làm systemd user service) và app desktop `python3 app.py`.
 
 ## Chức năng chính
+- **Nhiều dự án**: mỗi dự án có bộ cột Kanban riêng; thanh bên gọn theo mẫu Todoist (cột của dự án nằm ngay dưới tên dự án), chuyển dự án ngay trên thanh công cụ.
 - **Bảng cột tuỳ biến**: tự thêm/đổi tên/đổi màu cột, kéo-thả việc giữa các cột, kéo vào cột Đã xong để hoàn thành.
-- **4 mức ưu tiên đặt tên tuỳ ý** (mặc định: Làm ngay / Quan trọng / Gấp / Thường), nhãn #tag, việc con (checklist) ngay trên thẻ.
+- **Bình luận + tệp đính kèm** trong từng việc (file lưu trên từng máy, không đi theo khi đồng bộ); ngày bắt đầu + người được giao cho mỗi việc.
+- **4 mức ưu tiên đặt tên tuỳ ý** (mặc định: Làm ngay / Quan trọng / Gấp / Thường), nhãn #tag (có quản lý: đổi tên/gỡ nhãn hàng loạt), việc con (checklist) ngay trên thẻ.
+- **Đồng hồ bấm giờ**: ghi thời gian làm THẬT cho từng việc, thống kê hiện riêng giờ thật vs ước lượng.
+- **Thùng rác**: xoá việc là vào thùng rác 30 ngày, khôi phục được — không còn xoá là mất luôn.
+- **Tìm mọi nơi** (Enter trong ô tìm): mọi dự án, cả việc đã xong, khớp cả trong bình luận.
 - **Lịch tuần kiểu Google Calendar**: bấm ô trống để tạo việc, kéo để dời giờ, tự xếp lịch, **chặn trùng giờ** khi lưu.
-- **Trang Hôm nay + Thống kê**: chuỗi ngày liên tiếp, so sánh tuần, đúng-hạn %, xuất báo cáo tuần ra ảnh PNG.
-- **Việc lặp nâng cao**: mỗi ngày/tuần/tháng, lặp theo thứ (T2, T4, T6…), giới hạn số lần; việc con tự reset mỗi lần lặp.
+- **Trang Hôm nay + Thống kê**: chuỗi ngày liên tiếp, so sánh tuần, đúng-hạn %, tỉ lệ hoàn thành, sắp đến hạn, xuất báo cáo tuần ra ảnh PNG.
+- **Việc lặp nâng cao**: mỗi ngày/tuần/tháng, lặp theo thứ (T2, T4, T6…), giới hạn số lần, **bỏ qua một kỳ** khi bận; việc con tự reset mỗi lần lặp.
 - **Nhắc việc**: thông báo trước hạn, quá hạn 30 phút nhắc lại mức khẩn, bản tin 07:30 sáng + xem trước 20:30 tối.
-- **Đồng bộ 2 máy** (cùng mạng/Tailscale) và xuất/nhập JSON; engine tự sao lưu database mỗi ngày (giữ 14 bản).
+- **Đồng bộ 2 máy** (cùng mạng/Tailscale) và xuất/nhập JSON, xuất CSV cho Excel; engine tự sao lưu database mỗi ngày (giữ 14 bản) và **khôi phục từ bản sao lưu ngay trong app**.
 - **Tự dọn dẹp**: việc đã xong quá 15 ngày tự xoá khỏi bảng cho gọn — nhưng vẫn tính đầy đủ trong thống kê (chuỗi ngày, đúng hạn, theo cột).
 - **Tự báo bản mới**: mỗi ngày app kiểm tra GitHub một lần; có bản mới là hiện nút ⬆ ngay trên thanh tiêu đề — bấm vào là mở trang tải.
 

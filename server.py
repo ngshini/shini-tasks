@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.3.0"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
+VERSION = "1.4.0"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
 TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
@@ -166,8 +166,56 @@ def init_db():
             pid = cur.lastrowid
             c.execute("UPDATE columns SET project_id=? WHERE project_id IS NULL", (pid,))
             c.execute("UPDATE tasks SET project_id=? WHERE project_id IS NULL", (pid,))
+        # --- GÓI HOÀN THIỆN v1.4.0 (Sinh 2026-11-16: 'app thiếu những gì để
+        #     hoàn thiện, bổ sung' — lên plan rồi làm luôn) ---
+        cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "deleted_at" not in cols:
+            # Xoá MỀM: việc xoá vào thùng rác (deleted_at có mốc) — khôi phục
+            # được; rác quá 30 ngày mới xoá hẳn (xem purge_old_done).
+            c.execute("ALTER TABLE tasks ADD COLUMN deleted_at TEXT")
+        if "actual_min" not in cols:
+            # Thời gian LÀM THẬT (phút) do đồng hồ bấm giờ ghi lại — tách bạch
+            # với estimate_min (ước lượng) để thống kê không nói dối.
+            c.execute("ALTER TABLE tasks ADD COLUMN actual_min INTEGER DEFAULT 0")
+        if "timer_start" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN timer_start TEXT")
 
 init_db()
+
+def _spawn_next(old):
+    """Chuẩn bị dữ liệu KỲ TIẾP theo của một việc lặp (dict từ hàng tasks) —
+    dùng chung cho 'đánh dấu xong' và 'bỏ qua lần này'. Trả None nếu không
+    còn kỳ tiếp (không lặp / hết số lần / không có ngày hạn để tính tiếp).
+    Việc con được LÀM MỚI (bỏ dấu xong) — danh sách gốc là mẫu checklist."""
+    rule = old["repeat_rule"] or "none"
+    left = old["repeat_left"]
+    if rule == "none" or not old["due_date"] or (left is not None and left <= 0):
+        return None
+    base = date.fromisoformat(old["due_date"])
+    if rule == "daily": nd = base + timedelta(days=1)
+    elif rule == "weekly": nd = base + timedelta(days=7)
+    elif rule == "monthly": nd = base + timedelta(days=30)
+    elif rule.startswith("wd:"):
+        wds = {int(x) for x in rule[3:].split(",") if x != ""}
+        nd = base
+        for _ in range(7):
+            nd += timedelta(days=1)
+            if nd.weekday() in wds: break
+    else:
+        return None
+    d = dict(old); d["due_date"] = nd.isoformat(); d["tags"] = (old["tags"] or "").split(",")
+    try:
+        subs = json.loads(old["subtasks"] or "[]")
+        for s in subs: s["done"] = False
+        d["subtasks"] = subs
+    except Exception:
+        d["subtasks"] = []
+    d["repeat_left"] = (left - 1) if left is not None else None
+    keys = ("title","notes","due_date","due_time","important","urgent","tags",
+            "estimate_min","remind_before","repeat_rule","column_id","subtasks",
+            "repeat_left","project_id","start_date","assignee")
+    return {k: d[k] for k in keys}
+
 
 def first_column_id(project_id=None):
     with db() as c:
@@ -464,7 +512,7 @@ def morning_briefing(now):
     with db() as c:
         if c.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone(): return True
         rows = [row_out(r, now) for r in c.execute(
-            "SELECT * FROM tasks WHERE status!='done' AND due_date IS NOT NULL AND due_date<=?",
+            "SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date<=?",
             (now.strftime("%Y-%m-%d"),)).fetchall()]
         overdue = [t for t in rows if t["due_date"] < now.strftime("%Y-%m-%d")]
         rows.sort(key=lambda x: -x["score"])
@@ -496,9 +544,9 @@ def evening_preview(now):
     with db() as c:
         if c.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone(): return True
         rows = [row_out(r, now) for r in c.execute(
-            "SELECT * FROM tasks WHERE status!='done' AND due_date=?", (tomorrow,)).fetchall()]
+            "SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date=?", (tomorrow,)).fetchall()]
         rows.sort(key=lambda x: (x.get("due_time") or "99:99", -x["score"]))
-        leftovers = c.execute("SELECT COUNT(*) FROM tasks WHERE status!='done' AND due_date IS NOT NULL AND due_date<=?",
+        leftovers = c.execute("SELECT COUNT(*) FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date<=?",
                                (now.strftime("%Y-%m-%d"),)).fetchone()[0]
         done_today = c.execute("SELECT COUNT(*) FROM tasks WHERE status='done' AND done_at LIKE ?",
                                 (now.strftime("%Y-%m-%d") + "%",)).fetchone()[0]
@@ -520,7 +568,7 @@ def reminder_loop():
         try:
             now = datetime.now()
             with db() as c:
-                rows = c.execute("SELECT * FROM tasks WHERE status!='done' AND due_date IS NOT NULL").fetchall()
+                rows = c.execute("SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date IS NOT NULL").fetchall()
                 for r in rows:
                     # Đang hoãn nhắc (nút 'Nhắc lại sau 15 phút' trên thông báo) thì bỏ qua
                     sz = c.execute("SELECT v FROM meta WHERE k=?", (f"snooze_{r['id']}",)).fetchone()
@@ -584,6 +632,24 @@ def purge_old_done():
             c.execute("DELETE FROM tasks WHERE id=?", (r["id"],))
             n += 1
     if n: print(f"purge: da xoa {n} viec xong qua 15 ngay (van tinh trong thong ke)", flush=True)
+    # Thùng rác: việc nằm trong rác quá 30 ngày thì xoá HẲN (kèm bình luận +
+    # file đính kèm) — trước 30 ngày người dùng vẫn khôi phục được.
+    tcut = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+    m = 0; dead_files = []
+    with db() as c:
+        rows = c.execute("SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+                         (tcut,)).fetchall()
+        for r in rows:
+            dead_files += [a["stored"] for a in c.execute(
+                "SELECT stored FROM attachments WHERE task_id=?", (r["id"],)).fetchall()]
+            c.execute("DELETE FROM attachments WHERE task_id=?", (r["id"],))
+            c.execute("DELETE FROM comments WHERE task_id=?", (r["id"],))
+            c.execute("DELETE FROM tasks WHERE id=?", (r["id"],))
+            m += 1
+    for s in dead_files:
+        try: os.remove(os.path.join(DATA, "attachments", s))
+        except Exception: pass
+    if m: print(f"purge: da xoa han {m} viec trong thung rac qua 30 ngay", flush=True)
     return n
 
 def _ver_newer(a, b):
@@ -696,7 +762,13 @@ class H(BaseHTTPRequestHandler):
             q = parse_qs(u.query); view = q.get("view", ["today"])[0]
             today = date.today(); now = datetime.now()
             with db() as c:
-                rows = [row_out(r, now) for r in c.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()]
+                allrows = [row_out(r, now) for r in c.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()]
+            if view == "trash":
+                # Thùng rác: chỉ việc đã xoá mềm, mới xoá lên đầu
+                out = sorted([t for t in allrows if t.get("deleted_at")],
+                             key=lambda x: x.get("deleted_at") or "", reverse=True)
+                return self._json({"tasks": out})
+            rows = [t for t in allrows if not t.get("deleted_at")]
             if view == "today":
                 out = [t for t in rows if t["status"] != "done" and (not t["due_date"] or t["due_date"] <= today.isoformat())]
             elif view == "week":
@@ -757,20 +829,96 @@ class H(BaseHTTPRequestHandler):
             # Gói toàn bộ dữ liệu (việc + cột) để sao lưu rời / đồng bộ sang máy khác
             now = datetime.now()
             with db() as c:
-                tasks = [row_out(r, now) for r in c.execute("SELECT * FROM tasks").fetchall()]
+                tasks = [row_out(r, now) for r in c.execute("SELECT * FROM tasks WHERE deleted_at IS NULL").fetchall()]
                 cols = [dict(r) for r in c.execute("SELECT * FROM columns ORDER BY position, id").fetchall()]
                 prs = [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY position, id").fetchall()]
                 cmts = [dict(r) for r in c.execute("SELECT * FROM comments ORDER BY id").fetchall()]
             # File đính kèm KHÔNG đi theo bản xuất (file nằm ở thư mục dữ liệu từng máy)
             return self._json({"exported_at": now.isoformat(timespec="seconds"),
                                "tasks": tasks, "columns": cols, "projects": prs, "comments": cmts})
+        if u.path == "/api/search":
+            # Tìm MỌI NƠI: mọi dự án, cả việc đã xong, khớp cả trong BÌNH LUẬN —
+            # khác ô tìm trên bảng (chỉ lọc việc đang hiện). Không tìm trong rác.
+            q = (parse_qs(u.query).get("q", [""])[0] or "").strip().lower()
+            if not q: return self._json({"tasks": []})
+            now = datetime.now()
+            with db() as c:
+                rows = [row_out(r, now) for r in c.execute(
+                    "SELECT * FROM tasks WHERE deleted_at IS NULL").fetchall()]
+                hit_cmt = {r[0] for r in c.execute(
+                    "SELECT DISTINCT task_id FROM comments WHERE lower(content) LIKE ?",
+                    (f"%{q}%",)).fetchall()}
+                pnames = {p["id"]: p["name"] for p in
+                          [dict(r) for r in c.execute("SELECT id, name FROM projects").fetchall()]}
+            out = []
+            for t in rows:
+                hay = " ".join([t["title"] or "", t.get("notes") or "",
+                                t.get("assignee") or "", ",".join(t["tags"])]).lower()
+                if q in hay or t["id"] in hit_cmt:
+                    t["project_name"] = pnames.get(t.get("project_id"), "")
+                    t["via_comment"] = t["id"] in hit_cmt and q not in hay
+                    out.append(t)
+            out.sort(key=lambda x: (x["status"] == "done", -(x.get("id") or 0)))
+            return self._json({"tasks": out[:50]})
+        if u.path == "/api/tags":
+            # Mọi nhãn đang dùng + số việc — nền cho hộp Quản lý nhãn ở app
+            with db() as c:
+                rows = c.execute("SELECT tags FROM tasks WHERE deleted_at IS NULL").fetchall()
+            cnt = {}
+            for r in rows:
+                for tg in (r[0] or "").split(","):
+                    tg = tg.strip()
+                    if tg: cnt[tg] = cnt.get(tg, 0) + 1
+            return self._json({"tags": [{"tag": k, "count": v} for k, v in
+                                        sorted(cnt.items(), key=lambda kv: -kv[1])]})
+        if u.path == "/api/backups":
+            bdir = os.path.join(DATA, "backups")
+            out = []
+            if os.path.isdir(bdir):
+                for fn in sorted(os.listdir(bdir), reverse=True):
+                    if fn.endswith(".db"):
+                        fp = os.path.join(bdir, fn)
+                        out.append({"name": fn, "size": os.path.getsize(fp),
+                                    "mtime": datetime.fromtimestamp(
+                                        os.path.getmtime(fp)).isoformat(timespec="seconds")})
+            return self._json({"backups": out})
+        if u.path == "/api/export.csv":
+            # Xuất CSV (mở bằng Excel/Sheets) — có BOM để Excel đọc đúng tiếng Việt
+            import csv, io
+            now = datetime.now()
+            with db() as c:
+                rows = [row_out(r, now) for r in c.execute(
+                    "SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY id").fetchall()]
+                cnames = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM columns").fetchall()}
+                pnames = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects").fetchall()}
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["ID", "Tiêu đề", "Trạng thái", "Dự án", "Cột", "Ngày bắt đầu",
+                        "Hạn", "Giờ hạn", "Ước lượng (phút)", "Đã làm thật (phút)",
+                        "Người phụ trách", "Nhãn", "Ngày tạo", "Ngày xong"])
+            for t in rows:
+                w.writerow([t["id"], t["title"],
+                            "Đã xong" if t["status"] == "done" else "Đang mở",
+                            pnames.get(t.get("project_id"), ""), cnames.get(t.get("column_id"), ""),
+                            t.get("start_date") or "", t.get("due_date") or "",
+                            t.get("due_time") or "", t.get("estimate_min") or "",
+                            t.get("actual_min") or 0, t.get("assignee") or "",
+                            ",".join(t["tags"]), (t.get("created_at") or "")[:10],
+                            (t.get("done_at") or "")[:10]])
+            data = ("﻿" + buf.getvalue()).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", "attachment; filename=shini-tasks.csv")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+            return
         if u.path == "/api/calendar.ics":
             # Lịch MỘT CHIỀU (chỉ xem) cho Google Calendar / lịch iOS đăng ký theo
             # dõi: việc có giờ -> sự kiện giờ; việc chỉ có ngày -> sự kiện cả ngày.
             now = datetime.now()
             with db() as c:
                 rows = [row_out(r, now) for r in c.execute(
-                    "SELECT * FROM tasks WHERE status!='done' AND due_date IS NOT NULL "
+                    "SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date IS NOT NULL "
                     "ORDER BY due_date, due_time").fetchall()]
             def esc(s):
                 return (s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
@@ -811,7 +959,7 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/stats":
             now = datetime.now(); today = date.today().isoformat()
             with db() as c:
-                rows = [row_out(r, now) for r in c.execute("SELECT * FROM tasks").fetchall()]
+                rows = [row_out(r, now) for r in c.execute("SELECT * FROM tasks WHERE deleted_at IS NULL").fetchall()]
             open_ = [t for t in rows if t["status"] != "done"]
             # --- Thống kê sâu (GĐ3): streak ngày có việc xong, so tuần này/tuần trước,
             #     cột ứ đọng lâu nhất — tính từ done_at/created_at có sẵn ---
@@ -861,6 +1009,10 @@ class H(BaseHTTPRequestHandler):
                 "by_status": {"todo": len([t for t in open_ if t["status"] == "todo"]),
                               "doing": len([t for t in open_ if t["status"] == "doing"]),
                               "done": len(rows) - len(open_) + len(arch_rows)},
+                # Thời gian THẬT (đồng hồ bấm giờ) vs ƯỚC LƯỢNG của việc đã xong
+                "actual_done_min": sum(t.get("actual_min") or 0 for t in rows if t["status"] == "done"),
+                "estimate_done_min": sum(t.get("estimate_min") or 0 for t in rows if t["status"] == "done"),
+                "timers_running": len([t for t in rows if t.get("timer_start")]),
                 "by_priority": [len([t for t in open_ if t["important"] and t["urgent"]]),
                                 len([t for t in open_ if t["important"] and not t["urgent"]]),
                                 len([t for t in open_ if t["urgent"] and not t["important"]]),
@@ -895,44 +1047,24 @@ class H(BaseHTTPRequestHandler):
                 old = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
                 if not old: return self._json({"error": "không thấy việc"}, 404)
                 if act == "done":
+                    # Đồng hồ đang chạy thì DỪNG và cộng phút làm thật trước
+                    extra = {}
+                    if old["timer_start"]:
+                        try:
+                            mins = int((datetime.now() - datetime.fromisoformat(old["timer_start"])).total_seconds() // 60)
+                        except Exception:
+                            mins = 0
+                        extra = {"actual_min": (old["actual_min"] or 0) + max(0, mins), "timer_start": None}
                     c.execute("UPDATE tasks SET status='done', done_at=?, updated_at=? WHERE id=?",
                               (datetime.now().isoformat(timespec="seconds"),
                                datetime.now().isoformat(timespec="seconds"), tid))
-                    # Việc lặp lại: CHUẨN BỊ dữ liệu việc kế tiếp tại đây nhưng chỉ
-                    # TẠO SAU khi khối db() này commit xong — insert_task mở kết nối
-                    # RIÊNG, gọi ngay trong lúc giao dịch chưa commit sẽ dính
-                    # 'database is locked' (lỗi tiềm ẩn từ bản cũ, lộ ra khi test
-                    # lặp có chủ đích 2026-11-10). Quy tắc nâng cao (hướng B):
-                    # - "wd:0,2,4" = lặp vào các THỨ đã chọn (0=Thứ Hai … 6=Chủ Nhật)
-                    # - repeat_left: còn N lần thì sinh tiếp với N-1; =0 thì DỪNG;
-                    #   NULL = lặp mãi như cũ
-                    # - VIỆC CON của việc kế tiếp được LÀM MỚI (bỏ hết dấu đã xong) —
-                    #   danh sách việc con của việc gốc đóng vai trò mẫu/checklist.
-                    rule = old["repeat_rule"] or "none"
-                    left = old["repeat_left"]
-                    if rule != "none" and old["due_date"] and (left is None or left > 0):
-                        base = date.fromisoformat(old["due_date"])
-                        if rule == "daily": nd = base + timedelta(days=1)
-                        elif rule == "weekly": nd = base + timedelta(days=7)
-                        elif rule == "monthly": nd = base + timedelta(days=30)
-                        elif rule.startswith("wd:"):
-                            wds = {int(x) for x in rule[3:].split(",") if x != ""}
-                            nd = base
-                            for _ in range(7):
-                                nd += timedelta(days=1)
-                                if nd.weekday() in wds: break
-                        else:
-                            nd = None
-                        if nd is not None:
-                            d = dict(old); d["due_date"] = nd.isoformat(); d["tags"] = (old["tags"] or "").split(",")
-                            try:
-                                subs = json.loads(old["subtasks"] or "[]")
-                                for s in subs: s["done"] = False
-                                d["subtasks"] = subs
-                            except Exception:
-                                d["subtasks"] = []
-                            d["repeat_left"] = (left - 1) if left is not None else None
-                            spawn = {k: d[k] for k in ("title","notes","due_date","due_time","important","urgent","tags","estimate_min","remind_before","repeat_rule","column_id","subtasks","repeat_left","project_id","start_date","assignee")}
+                    if extra:
+                        c.execute("UPDATE tasks SET actual_min=?, timer_start=NULL WHERE id=?",
+                                  (extra["actual_min"], tid))
+                    # Việc lặp: CHUẨN BỊ kỳ tiếp tại đây nhưng chỉ TẠO sau khi
+                    # khối db() commit xong — insert_task mở kết nối RIÊNG, gọi
+                    # trong lúc giao dịch chưa commit sẽ dính 'database is locked'.
+                    spawn = _spawn_next(old)
                 else:
                     c.execute("UPDATE tasks SET status='todo', done_at=NULL, notified=0, updated_at=? WHERE id=?",
                               (datetime.now().isoformat(timespec="seconds"), tid))
@@ -940,6 +1072,105 @@ class H(BaseHTTPRequestHandler):
             if spawn is not None:
                 insert_task(spawn, "repeat")
             return self._json({"task": task_now})
+        m = re.match(r"/api/tasks/(\d+)/(restore|skip|timer)$", u.path)
+        if m:
+            tid, act = int(m.group(1)), m.group(2)
+            now_s = datetime.now().isoformat(timespec="seconds")
+            if act == "restore":
+                with db() as c:
+                    c.execute("UPDATE tasks SET deleted_at=NULL, updated_at=? WHERE id=?", (now_s, tid))
+                    r = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+                return self._json({"task": row_out(r)}) if r else self._json({"error": "không thấy việc"}, 404)
+            if act == "timer":
+                d = self._body(); mode = d.get("action")
+                with db() as c:
+                    old = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+                    if not old: return self._json({"error": "không thấy việc"}, 404)
+                    if mode == "start":
+                        if old["timer_start"]:
+                            return self._json({"error": "đồng hồ đang chạy rồi"}, 400)
+                        c.execute("UPDATE tasks SET timer_start=?, updated_at=? WHERE id=?",
+                                  (now_s, now_s, tid))
+                    elif mode == "stop":
+                        if not old["timer_start"]:
+                            return self._json({"error": "đồng hồ chưa chạy"}, 400)
+                        mins = int((datetime.now() - datetime.fromisoformat(
+                            old["timer_start"])).total_seconds() // 60)
+                        c.execute("UPDATE tasks SET timer_start=NULL, actual_min=?, updated_at=? WHERE id=?",
+                                  ((old["actual_min"] or 0) + max(0, mins), now_s, tid))
+                    else:
+                        return self._json({"error": "action phải là start|stop"}, 400)
+                    r = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+                return self._json({"task": row_out(r)})
+            # skip: bỏ kỳ này của việc lặp — sinh kỳ tiếp (nếu còn) rồi xoá kỳ này.
+            # KHÔNG tính là xong (không vào thống kê việc xong, không done_at).
+            spawn = None
+            with db() as c:
+                old = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+                if not old: return self._json({"error": "không thấy việc"}, 404)
+                if (old["repeat_rule"] or "none") == "none":
+                    return self._json({"error": "việc này không lặp lại"}, 400)
+                spawn = _spawn_next(old)
+                atts = [r["stored"] for r in c.execute(
+                    "SELECT stored FROM attachments WHERE task_id=?", (tid,)).fetchall()]
+                c.execute("DELETE FROM attachments WHERE task_id=?", (tid,))
+                c.execute("DELETE FROM comments WHERE task_id=?", (tid,))
+                c.execute("DELETE FROM tasks WHERE id=?", (tid,))
+            for s in atts:
+                try: os.remove(os.path.join(DATA, "attachments", s))
+                except Exception: pass
+            if spawn is not None:
+                insert_task(spawn, "repeat")
+            return self._json({"ok": True, "spawned": spawn is not None})
+        m = re.match(r"/api/tags/(rename|delete)$", u.path)
+        if m:
+            d = self._body(); old_t = (d.get("old") or d.get("tag") or "").strip()
+            if not old_t: return self._json({"error": "thiếu nhãn"}, 400)
+            new_t = (d.get("new") or "").strip() if m.group(1) == "rename" else None
+            if m.group(1) == "rename" and not new_t:
+                return self._json({"error": "thiếu tên nhãn mới"}, 400)
+            n = 0
+            with db() as c:
+                for r in c.execute("SELECT id, tags FROM tasks WHERE tags LIKE ?",
+                                   (f"%{old_t}%",)).fetchall():
+                    tags = [x.strip() for x in (r["tags"] or "").split(",") if x.strip()]
+                    if old_t not in tags: continue
+                    if new_t is None:
+                        tags = [x for x in tags if x != old_t]
+                    else:
+                        tags = [new_t if x == old_t else x for x in tags]
+                        # gộp trùng nếu tên mới đã có sẵn trong cùng việc
+                        tags = list(dict.fromkeys(tags))
+                    c.execute("UPDATE tasks SET tags=?, updated_at=? WHERE id=?",
+                              (",".join(tags), datetime.now().isoformat(timespec="seconds"), r["id"]))
+                    n += 1
+            return self._json({"ok": True, "tasks_touched": n})
+        if u.path == "/api/restore":
+            # Khôi phục từ 1 bản sao lưu trong backups/: TRƯỚC khi thay, tự
+            # chụp lại DB hiện tại (pre-restore) để còn đường quay lại.
+            d = self._body(); name = os.path.basename(d.get("name") or "")
+            src = os.path.join(DATA, "backups", name)
+            if not name.endswith(".db") or not os.path.exists(src):
+                return self._json({"error": "không thấy bản sao lưu"}, 404)
+            try:
+                import sqlite3 as _sq
+                chk = _sq.connect(f"file:{src}?mode=ro", uri=True)
+                chk.execute("SELECT COUNT(*) FROM tasks").fetchone(); chk.close()
+            except Exception:
+                return self._json({"error": "file sao lưu không phải dữ liệu Shini Tasks"}, 400)
+            bdir = os.path.join(DATA, "backups"); os.makedirs(bdir, exist_ok=True)
+            pre = os.path.join(bdir, "tasks-pre-restore-" +
+                               datetime.now().strftime("%Y%m%d-%H%M%S") + ".db")
+            try:
+                import shutil; shutil.copy2(DB, pre)
+                shutil.copy2(src, DB)
+            except Exception as e:
+                return self._json({"error": f"khôi phục lỗi: {e}"}, 500)
+            # Bản sao lưu từ PHIÊN BẢN CŨ có thể thiếu các cột mới thêm sau này
+            # (deleted_at, actual_min...) — chạy lại di trú (idempotent) ngay
+            # để engine không gãy 'no such column' cho tới lần khởi động sau.
+            init_db()
+            return self._json({"ok": True, "pre_restore_backup": os.path.basename(pre)})
         if u.path == "/api/import":
             # Gộp dữ liệu từ máy khác: khớp theo id, bản updated_at MỚI HƠN thì thắng.
             # (Việc đã XOÁ hẳn ở máy kia không tự xoá ở máy này — giới hạn đã biết.)
@@ -1164,6 +1395,15 @@ class H(BaseHTTPRequestHandler):
         m = re.match(r"/api/tasks/(\d+)$", urlparse(self.path).path)
         if not m: return self._json({"error": "not found"}, 404)
         tid = int(m.group(1))
+        permanent = parse_qs(urlparse(self.path).query).get("permanent", ["0"])[0] == "1"
+        if not permanent:
+            # Xoá MỀM vào thùng rác — khôi phục bằng POST /api/tasks/<id>/restore;
+            # rác nằm quá 30 ngày sẽ bị xoá hẳn trong purge hằng ngày.
+            with db() as c:
+                c.execute("UPDATE tasks SET deleted_at=?, updated_at=? WHERE id=?",
+                          (datetime.now().isoformat(timespec="seconds"),
+                           datetime.now().isoformat(timespec="seconds"), tid))
+            return self._json({"ok": True, "trashed": True})
         with db() as c:
             atts = [r["stored"] for r in c.execute(
                 "SELECT stored FROM attachments WHERE task_id=?", (tid,)).fetchall()]
