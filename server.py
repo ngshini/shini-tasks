@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.2.1"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
+VERSION = "1.3.0"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
 TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
@@ -137,12 +137,55 @@ def init_db():
                     elif t["due_date"] == today.isoformat(): tgt = ids[min(1, len(ids) - 1)]
                     elif t["due_date"] and t["due_date"] <= (today + timedelta(days=7)).isoformat(): tgt = ids[min(2, len(ids) - 1)]
                 c.execute("UPDATE tasks SET column_id=? WHERE id=?", (tgt, t["id"]))
+        # --- GÓI KIMESFLOW (Sinh 2026-11-15): dự án + bình luận + đính kèm ---
+        # (Đặt CUỐI init_db: cần các cột di trú phía trên đã tồn tại, và cột mặc
+        # định của bản cài mới cũng phải được gán dự án.)
+        c.execute("""CREATE TABLE IF NOT EXISTS projects(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL, color TEXT DEFAULT '#60A5FA', position INTEGER DEFAULT 0)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS comments(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL,
+            author TEXT DEFAULT '', content TEXT NOT NULL, created_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS attachments(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL,
+            filename TEXT NOT NULL, stored TEXT NOT NULL,
+            size INTEGER DEFAULT 0, created_at TEXT)""")
+        cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "project_id" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN project_id INTEGER")
+        if "start_date" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN start_date TEXT")
+        if "assignee" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN assignee TEXT")
+        ccols = [r[1] for r in c.execute("PRAGMA table_info(columns)").fetchall()]
+        if "project_id" not in ccols:
+            c.execute("ALTER TABLE columns ADD COLUMN project_id INTEGER")
+        # Di trú: chưa có dự án nào -> tạo dự án 'Chung' và gán mọi cột + việc vào
+        if c.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0:
+            cur = c.execute("INSERT INTO projects(name, color, position) VALUES('Chung', '#60A5FA', 0)")
+            pid = cur.lastrowid
+            c.execute("UPDATE columns SET project_id=? WHERE project_id IS NULL", (pid,))
+            c.execute("UPDATE tasks SET project_id=? WHERE project_id IS NULL", (pid,))
 
 init_db()
 
-def first_column_id():
+def first_column_id(project_id=None):
     with db() as c:
+        if project_id:
+            r = c.execute("SELECT id FROM columns WHERE project_id=? ORDER BY position, id LIMIT 1",
+                          (project_id,)).fetchone()
+            if r: return r[0]
         r = c.execute("SELECT id FROM columns ORDER BY position, id LIMIT 1").fetchone()
+        return r[0] if r else None
+
+def default_project_id():
+    with db() as c:
+        r = c.execute("SELECT id FROM projects ORDER BY position, id LIMIT 1").fetchone()
+        return r[0] if r else None
+
+def column_project_id(column_id):
+    with db() as c:
+        r = c.execute("SELECT project_id FROM columns WHERE id=?", (column_id,)).fetchone()
         return r[0] if r else None
 
 # ---------- Điểm ưu tiên: việc nào nên làm trước ----------
@@ -190,9 +233,19 @@ def parse_quick(text):
     important = urgent = False
     tags, estimate, remind = [], None, 30
     t = raw
-    # thẻ #tag
+    # thẻ #tag — riêng thẻ ưu tiên kiểu KimesFlow (#urgent, #important, #high...)
+    # thì thành CỜ ưu tiên chứ không thành nhãn
+    PRIO_TAGS = {"urgent": (True, True), "gap": (False, True), "gấp": (False, True),
+                 "khẩn": (False, True), "khan": (False, True),
+                 "important": (True, False), "quantrong": (True, False),
+                 "quantrọng": (True, False), "high": (True, False), "cao": (True, False)}
     for m in re.finditer(r"#([\w\-à-ỹ]+)", t, re.I):
-        tags.append(m.group(1))
+        w = m.group(1).lower()
+        if w in PRIO_TAGS:
+            pi, pu = PRIO_TAGS[w]
+            important = important or pi; urgent = urgent or pu
+        else:
+            tags.append(m.group(1))
     t = re.sub(r"#[\w\-à-ỹ]+", "", t, flags=re.I).strip()
     # cờ ưu tiên
     if re.search(r"!gấp|!gap|\bgấp\b|\bkhẩn\b", low): urgent = True
@@ -257,6 +310,19 @@ def parse_quick(text):
     if m:
         remind = int(m.group(1)) * (60 if m.group(2) in ("giờ","h") else 1)
         t = (t[:m.start()] + t[m.end():]).strip()
+    # hạn kiểu máy due:2026-11-20 (KimesFlow) — thắng mọi cách ghi ngày khác
+    forced_due = None
+    m = re.search(r"\bdue:\s*(\d{4})-(\d{2})-(\d{2})\b", t, re.I)
+    if m:
+        try: forced_due = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError: forced_due = None
+        t = (t[:m.start()] + t[m.end():]).strip()
+    # người được giao: @ten (1 từ)
+    assignee = None
+    m = re.search(r"@([\wà-ỹÀ-Ỹ]+)", t)
+    if m:
+        assignee = m.group(1)
+        t = (t[:m.start()] + t[m.end():]).strip()
     # ngày (việc lặp theo thứ: ngày đầu tiên đã chốt ở khối lặp phía trên)
     if rep_due is not None: due_d = rep_due
     elif re.search(r"\bhôm nay\b|\bnay\b", low): due_d = today
@@ -278,6 +344,7 @@ def parse_quick(text):
                     due_d = today + timedelta(days=delta if delta else 7)
                     t = re.sub(re.escape(name), "", t, flags=re.I).strip()
                     break
+    if forced_due is not None: due_d = forced_due
     # việc lặp mà chưa có ngày nào thì lấy HÔM NAY làm lần đầu tiên
     if rep_rule != "none" and not due_d: due_d = today
     # dọn chữ ngày/giờ còn sót khỏi tiêu đề
@@ -286,22 +353,30 @@ def parse_quick(text):
     return {"title": t or raw, "due_date": due_d.isoformat() if due_d else None,
             "due_time": due_t, "important": important, "urgent": urgent,
             "tags": tags, "estimate_min": estimate, "remind_before": remind,
-            "repeat_rule": rep_rule, "repeat_left": rep_left}
+            "repeat_rule": rep_rule, "repeat_left": rep_left,
+            "assignee": assignee, "start_date": None}
 
 def insert_task(d, source="web"):
     now = datetime.now().isoformat(timespec="seconds")
-    col = d.get("column_id") or first_column_id()
+    col = d.get("column_id")
+    pid = d.get("project_id")
+    if col: pid = column_project_id(col) or pid
+    if not col:
+        col = first_column_id(pid) if pid else first_column_id()
+        pid = pid or column_project_id(col)
+    if not pid: pid = default_project_id()
     subs = d.get("subtasks") or []
     if not isinstance(subs, str): subs = json.dumps(subs, ensure_ascii=False)
     with db() as c:
         cur = c.execute("""INSERT INTO tasks(title,notes,due_date,due_time,important,urgent,tags,
-            estimate_min,remind_before,repeat_rule,status,source,created_at,column_id,subtasks,updated_at,repeat_left)
-            VALUES(?,?,?,?,?,?,?,?,?,?, 'todo', ?, ?, ?, ?, ?, ?)""",
+            estimate_min,remind_before,repeat_rule,status,source,created_at,column_id,subtasks,updated_at,repeat_left,
+            project_id,start_date,assignee)
+            VALUES(?,?,?,?,?,?,?,?,?,?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (d.get("title","").strip(), d.get("notes",""), d.get("due_date"), d.get("due_time"),
              1 if d.get("important") else 0, 1 if d.get("urgent") else 0,
              ",".join(d.get("tags") or []), d.get("estimate_min"),
              d.get("remind_before", 30), d.get("repeat_rule","none"), source, now, col, subs, now,
-             d.get("repeat_left")))
+             d.get("repeat_left"), pid, d.get("start_date"), d.get("assignee")))
         rid = cur.lastrowid
     with db() as c:
         return row_out(c.execute("SELECT * FROM tasks WHERE id=?", (rid,)).fetchone())
@@ -635,7 +710,45 @@ class H(BaseHTTPRequestHandler):
             else:
                 out = [t for t in rows if t["status"] != "done"]
             out.sort(key=lambda x: -x["score"])
+            with db() as c:
+                cm = {r[0]: r[1] for r in c.execute("SELECT task_id, COUNT(*) FROM comments GROUP BY task_id").fetchall()}
+                am = {r[0]: r[1] for r in c.execute("SELECT task_id, COUNT(*) FROM attachments GROUP BY task_id").fetchall()}
+            for t in out:
+                t["comment_count"] = cm.get(t["id"], 0); t["attach_count"] = am.get(t["id"], 0)
             return self._json({"tasks": out})
+        if u.path == "/api/projects":
+            with db() as c:
+                prs = [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY position, id").fetchall()]
+            return self._json({"projects": prs})
+        m = re.match(r"/api/tasks/(\d+)/(comments|attachments)$", u.path)
+        if m:
+            tid = int(m.group(1))
+            with db() as c:
+                if m.group(2) == "comments":
+                    rows = [dict(r) for r in c.execute(
+                        "SELECT * FROM comments WHERE task_id=? ORDER BY id", (tid,)).fetchall()]
+                    return self._json({"comments": rows})
+                rows = [dict(r) for r in c.execute(
+                    "SELECT id,task_id,filename,size,created_at FROM attachments "
+                    "WHERE task_id=? ORDER BY id", (tid,)).fetchall()]
+            return self._json({"attachments": rows})
+        m = re.match(r"/api/attachments/(\d+)/download$", u.path)
+        if m:
+            with db() as c:
+                r = c.execute("SELECT * FROM attachments WHERE id=?", (int(m.group(1)),)).fetchone()
+            if not r: return self._json({"error": "không thấy file"}, 404)
+            path = os.path.join(DATA, "attachments", r["stored"])
+            if not os.path.exists(path): return self._json({"error": "file đã mất"}, 404)
+            data = open(path, "rb").read()
+            import mimetypes
+            ctype = mimetypes.guess_type(r["filename"])[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Disposition",
+                             "attachment; filename*=UTF-8''" + urllib.parse.quote(r["filename"]))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+            return
         if u.path == "/api/columns":
             with db() as c:
                 cols = [dict(r) for r in c.execute("SELECT * FROM columns ORDER BY position, id").fetchall()]
@@ -646,8 +759,11 @@ class H(BaseHTTPRequestHandler):
             with db() as c:
                 tasks = [row_out(r, now) for r in c.execute("SELECT * FROM tasks").fetchall()]
                 cols = [dict(r) for r in c.execute("SELECT * FROM columns ORDER BY position, id").fetchall()]
+                prs = [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY position, id").fetchall()]
+                cmts = [dict(r) for r in c.execute("SELECT * FROM comments ORDER BY id").fetchall()]
+            # File đính kèm KHÔNG đi theo bản xuất (file nằm ở thư mục dữ liệu từng máy)
             return self._json({"exported_at": now.isoformat(timespec="seconds"),
-                               "tasks": tasks, "columns": cols})
+                               "tasks": tasks, "columns": cols, "projects": prs, "comments": cmts})
         if u.path == "/api/calendar.ics":
             # Lịch MỘT CHIỀU (chỉ xem) cho Google Calendar / lịch iOS đăng ký theo
             # dõi: việc có giờ -> sự kiện giờ; việc chỉ có ngày -> sự kiện cả ngày.
@@ -738,6 +854,17 @@ class H(BaseHTTPRequestHandler):
                 "version": VERSION, "latest_version": latest_ver,
                 "update_available": bool(latest_ver) and _ver_newer(latest_ver, VERSION),
                 "latest_url": mrows.get("latest_url") or "",
+                "completion_rate": round((len(rows) - len(open_) + len(arch_rows))
+                                         / max(1, len(rows) + len(arch_rows)) * 100),
+                "due_soon": len([t for t in open_ if t["due_date"] and today < t["due_date"]
+                                 <= (date.today() + timedelta(days=3)).isoformat()]),
+                "by_status": {"todo": len([t for t in open_ if t["status"] == "todo"]),
+                              "doing": len([t for t in open_ if t["status"] == "doing"]),
+                              "done": len(rows) - len(open_) + len(arch_rows)},
+                "by_priority": [len([t for t in open_ if t["important"] and t["urgent"]]),
+                                len([t for t in open_ if t["important"] and not t["urgent"]]),
+                                len([t for t in open_ if t["urgent"] and not t["important"]]),
+                                len([t for t in open_ if not t["important"] and not t["urgent"]])],
                 "due_today": len([t for t in open_ if t["due_date"] == today]),
                 "overdue": len([t for t in open_ if t["due_date"] and t["due_date"] < today]),
                 "next": sorted(open_, key=lambda x: -x["score"])[:3],
@@ -751,7 +878,11 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/quick":
             d = self._body(); text = (d.get("text") or "").strip()
             if not text: return self._json({"error": "thiếu text"}, 400)
-            return self._json({"task": insert_task(parse_quick(text), d.get("source", "api"))}, 201)
+            p = parse_quick(text)
+            # App đang xem dự án/cột nào thì việc bắt nhanh rơi vào đó
+            if d.get("column_id"): p["column_id"] = d["column_id"]
+            if d.get("project_id"): p["project_id"] = d["project_id"]
+            return self._json({"task": insert_task(p, d.get("source", "api"))}, 201)
         if u.path == "/api/tasks":
             d = self._body()
             if not (d.get("title") or "").strip(): return self._json({"error": "thiếu tiêu đề"}, 400)
@@ -801,7 +932,7 @@ class H(BaseHTTPRequestHandler):
                             except Exception:
                                 d["subtasks"] = []
                             d["repeat_left"] = (left - 1) if left is not None else None
-                            spawn = {k: d[k] for k in ("title","notes","due_date","due_time","important","urgent","tags","estimate_min","remind_before","repeat_rule","column_id","subtasks","repeat_left")}
+                            spawn = {k: d[k] for k in ("title","notes","due_date","due_time","important","urgent","tags","estimate_min","remind_before","repeat_rule","column_id","subtasks","repeat_left","project_id","start_date","assignee")}
                 else:
                     c.execute("UPDATE tasks SET status='todo', done_at=NULL, notified=0, updated_at=? WHERE id=?",
                               (datetime.now().isoformat(timespec="seconds"), tid))
@@ -818,14 +949,24 @@ class H(BaseHTTPRequestHandler):
                 # Việc đã TỰ XOÁ sau 15 ngày (có trong done_archive) không được
                 # hồi sinh qua đồng bộ/khôi phục từ máy khác
                 arch_ids = {r["id"] for r in c.execute("SELECT id FROM done_archive").fetchall()}
+                for pr in d.get("projects") or []:
+                    cur = c.execute("SELECT id FROM projects WHERE id=?", (pr["id"],)).fetchone()
+                    if cur:
+                        c.execute("UPDATE projects SET name=?, color=?, position=? WHERE id=?",
+                                  (pr.get("name", ""), pr.get("color", "#60A5FA"), pr.get("position", 0), pr["id"]))
+                    else:
+                        c.execute("INSERT INTO projects(id, name, color, position) VALUES(?,?,?,?)",
+                                  (pr["id"], pr.get("name", ""), pr.get("color", "#60A5FA"), pr.get("position", 0)))
                 for col in d.get("columns") or []:
                     cur = c.execute("SELECT id FROM columns WHERE id=?", (col["id"],)).fetchone()
                     if cur:
-                        c.execute("UPDATE columns SET name=?, color=?, position=? WHERE id=?",
-                                  (col["name"], col.get("color", "#60A5FA"), col.get("position", 0), col["id"]))
+                        c.execute("UPDATE columns SET name=?, color=?, position=?, project_id=? WHERE id=?",
+                                  (col["name"], col.get("color", "#60A5FA"), col.get("position", 0),
+                                   col.get("project_id"), col["id"]))
                     else:
-                        c.execute("INSERT INTO columns(id, name, color, position) VALUES(?,?,?,?)",
-                                  (col["id"], col["name"], col.get("color", "#60A5FA"), col.get("position", 0)))
+                        c.execute("INSERT INTO columns(id, name, color, position, project_id) VALUES(?,?,?,?,?)",
+                                  (col["id"], col["name"], col.get("color", "#60A5FA"), col.get("position", 0),
+                                   col.get("project_id")))
                 for t in d.get("tasks") or []:
                     if t.get("status") == "done" and t.get("id") in arch_ids:
                         skip += 1; continue
@@ -837,37 +978,105 @@ class H(BaseHTTPRequestHandler):
                             ",".join(t.get("tags") or []), t.get("estimate_min"), t.get("remind_before", 30),
                             t.get("repeat_rule", "none"), t.get("status", "todo"), t.get("source", "sync"),
                             t.get("created_at"), t.get("done_at"), t.get("column_id"), subs,
-                            t.get("updated_at"), t.get("repeat_left"))
+                            t.get("updated_at"), t.get("repeat_left"), t.get("project_id"),
+                            t.get("start_date"), t.get("assignee"))
                     if cur is None:
                         c.execute("""INSERT INTO tasks(id,title,notes,due_date,due_time,important,urgent,tags,
                             estimate_min,remind_before,repeat_rule,status,source,created_at,done_at,column_id,
-                            subtasks,updated_at,repeat_left) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            subtasks,updated_at,repeat_left,project_id,start_date,assignee)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (t["id"],) + vals)
                         ins += 1
                     elif (t.get("updated_at") or "") > (cur["updated_at"] or ""):
                         c.execute("""UPDATE tasks SET title=?,notes=?,due_date=?,due_time=?,important=?,urgent=?,
                             tags=?,estimate_min=?,remind_before=?,repeat_rule=?,status=?,source=?,created_at=?,
-                            done_at=?,column_id=?,subtasks=?,updated_at=?,repeat_left=? WHERE id=?""",
+                            done_at=?,column_id=?,subtasks=?,updated_at=?,repeat_left=?,project_id=?,
+                            start_date=?,assignee=? WHERE id=?""",
                             vals + (t["id"],))
                         upd += 1
                     else:
                         skip += 1
+                for cm in d.get("comments") or []:
+                    cur = c.execute("SELECT id FROM comments WHERE id=?", (cm["id"],)).fetchone()
+                    if not cur:
+                        c.execute("INSERT INTO comments(id, task_id, author, content, created_at) VALUES(?,?,?,?,?)",
+                                  (cm["id"], cm["task_id"], cm.get("author", ""), cm.get("content", ""),
+                                   cm.get("created_at")))
             return self._json({"ok": True, "inserted": ins, "updated": upd, "skipped": skip})
         if u.path == "/api/notify-test":
             notify("🔔 Shini Tasks", "Thông báo thử — kênh nhắc việc đang hoạt động tốt.")
             return self._json({"ok": True})
+        if u.path == "/api/projects":
+            d = self._body()
+            if not (d.get("name") or "").strip(): return self._json({"error": "thiếu tên dự án"}, 400)
+            with db() as c:
+                pos = c.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM projects").fetchone()[0]
+                cur = c.execute("INSERT INTO projects(name, color, position) VALUES(?,?,?)",
+                                (d["name"].strip(), d.get("color") or "#60A5FA", pos))
+                pid = cur.lastrowid
+                # Dự án mới có sẵn 3 trạng thái mặc định kiểu KimesFlow
+                for i, (nm, cl) in enumerate([("Cần làm", "#64748B"), ("Đang làm", "#2563EB"),
+                                              ("Hoàn thành", "#059669")]):
+                    c.execute("INSERT INTO columns(name, color, position, project_id) VALUES(?,?,?,?)",
+                              (nm, cl, i, pid))
+                r = c.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+            return self._json({"project": dict(r)}, 201)
+        m = re.match(r"/api/tasks/(\d+)/(comments|attachments)$", u.path)
+        if m:
+            tid = int(m.group(1)); d = self._body()
+            with db() as c:
+                exists = c.execute("SELECT id FROM tasks WHERE id=?", (tid,)).fetchone()
+            if not exists: return self._json({"error": "không thấy việc"}, 404)
+            if m.group(2) == "comments":
+                content = (d.get("content") or "").strip()
+                if not content: return self._json({"error": "bình luận trống"}, 400)
+                with db() as c:
+                    cur = c.execute("INSERT INTO comments(task_id, author, content, created_at) VALUES(?,?,?,?)",
+                                    (tid, (d.get("author") or "").strip(), content,
+                                     datetime.now().isoformat(timespec="seconds")))
+                    r = c.execute("SELECT * FROM comments WHERE id=?", (cur.lastrowid,)).fetchone()
+                return self._json({"comment": dict(r)}, 201)
+            # Đính kèm: app đọc file rồi gửi base64 (engine là HTTP thuần, không multipart)
+            import base64, uuid
+            fname = os.path.basename((d.get("filename") or "file").strip()) or "file"
+            try: raw = base64.b64decode(d.get("data_b64") or "", validate=True)
+            except Exception: return self._json({"error": "dữ liệu file không hợp lệ"}, 400)
+            if len(raw) > 25 * 1024 * 1024: return self._json({"error": "file quá 25 MB"}, 400)
+            adir = os.path.join(DATA, "attachments"); os.makedirs(adir, exist_ok=True)
+            stored = f"{tid}_{uuid.uuid4().hex[:12]}_{fname}"
+            with open(os.path.join(adir, stored), "wb") as f: f.write(raw)
+            with db() as c:
+                cur = c.execute("INSERT INTO attachments(task_id, filename, stored, size, created_at) VALUES(?,?,?,?,?)",
+                                (tid, fname, stored, len(raw),
+                                 datetime.now().isoformat(timespec="seconds")))
+                r = c.execute("SELECT id,task_id,filename,size,created_at FROM attachments WHERE id=?",
+                              (cur.lastrowid,)).fetchone()
+            return self._json({"attachment": dict(r)}, 201)
         if u.path == "/api/columns":
             d = self._body()
             if not (d.get("name") or "").strip(): return self._json({"error": "thiếu tên cột"}, 400)
+            pid = d.get("project_id") or default_project_id()
             with db() as c:
-                pos = c.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM columns").fetchone()[0]
-                cur = c.execute("INSERT INTO columns(name, color, position) VALUES(?,?,?)",
-                                (d["name"].strip(), d.get("color") or "#60A5FA", pos))
+                pos = c.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM columns WHERE project_id=?",
+                                (pid,)).fetchone()[0]
+                cur = c.execute("INSERT INTO columns(name, color, position, project_id) VALUES(?,?,?,?)",
+                                (d["name"].strip(), d.get("color") or "#60A5FA", pos, pid))
                 r = c.execute("SELECT * FROM columns WHERE id=?", (cur.lastrowid,)).fetchone()
             return self._json({"column": dict(r)}, 201)
         return self._json({"error": "not found"}, 404)
     def do_PATCH(self):
         if not self._auth(): return self._json({"error": "sai token"}, 403)
+        mp = re.match(r"/api/projects/(\d+)$", urlparse(self.path).path)
+        if mp:
+            d = self._body(); prid = int(mp.group(1))
+            sets, vals = [], []
+            for k in ("name", "color", "position"):
+                if k in d: sets.append(f"{k}=?"); vals.append(d[k])
+            if sets:
+                with db() as c: c.execute(f"UPDATE projects SET {','.join(sets)} WHERE id=?", vals + [prid])
+            with db() as c:
+                r = c.execute("SELECT * FROM projects WHERE id=?", (prid,)).fetchone()
+            return self._json({"project": dict(r)}) if r else self._json({"error": "không thấy dự án"}, 404)
         mc = re.match(r"/api/columns/(\d+)$", urlparse(self.path).path)
         if mc:
             d = self._body(); cid = int(mc.group(1))
@@ -884,7 +1093,8 @@ class H(BaseHTTPRequestHandler):
         d = self._body(); tid = int(m.group(1))
         fields = {"title":"title","notes":"notes","due_date":"due_date","due_time":"due_time",
                   "estimate_min":"estimate_min","remind_before":"remind_before","repeat_rule":"repeat_rule","repeat_left":"repeat_left","status":"status",
-                  "column_id":"column_id"}
+                  "column_id":"column_id","project_id":"project_id","start_date":"start_date",
+                  "assignee":"assignee"}
         sets, vals = [], []
         for k, col in fields.items():
             if k in d: sets.append(f"{col}=?"); vals.append(d[k])
@@ -895,6 +1105,10 @@ class H(BaseHTTPRequestHandler):
             subs = d["subtasks"]
             if not isinstance(subs, str): subs = json.dumps(subs, ensure_ascii=False)
             sets.append("subtasks=?"); vals.append(subs)
+        if "column_id" in d and "project_id" not in d:
+            # Đổi cột thì dự án đi theo cột mới (cột thuộc dự án nào, việc thuộc dự án đó)
+            pid = column_project_id(d["column_id"])
+            if pid: sets.append("project_id=?"); vals.append(pid)
         if sets:
             sets.append("notified=0"); sets.append("escalated=0")
             sets.append("updated_at=?"); vals.append(datetime.now().isoformat(timespec="seconds"))
@@ -905,20 +1119,60 @@ class H(BaseHTTPRequestHandler):
         return self._json({"task": row_out(r)}) if r else self._json({"error": "không thấy việc"}, 404)
     def do_DELETE(self):
         if not self._auth(): return self._json({"error": "sai token"}, 403)
+        mp = re.match(r"/api/projects/(\d+)$", urlparse(self.path).path)
+        if mp:
+            prid = int(mp.group(1))
+            with db() as c:
+                ids = [r[0] for r in c.execute("SELECT id FROM projects ORDER BY position, id").fetchall()]
+                if prid not in ids: return self._json({"error": "không thấy dự án"}, 404)
+                if len(ids) <= 1: return self._json({"error": "phải giữ ít nhất 1 dự án"}, 400)
+                fb = next(i for i in ids if i != prid)
+                fcol = c.execute("SELECT id FROM columns WHERE project_id=? ORDER BY position, id LIMIT 1",
+                                 (fb,)).fetchone()
+                c.execute("UPDATE tasks SET project_id=?, column_id=? WHERE project_id=?",
+                          (fb, fcol[0] if fcol else None, prid))
+                c.execute("DELETE FROM columns WHERE project_id=?", (prid,))
+                c.execute("DELETE FROM projects WHERE id=?", (prid,))
+            return self._json({"ok": True, "moved_to": fb})
+        mcm = re.match(r"/api/comments/(\d+)$", urlparse(self.path).path)
+        if mcm:
+            with db() as c: c.execute("DELETE FROM comments WHERE id=?", (int(mcm.group(1)),))
+            return self._json({"ok": True})
+        mat = re.match(r"/api/attachments/(\d+)$", urlparse(self.path).path)
+        if mat:
+            aid = int(mat.group(1))
+            with db() as c:
+                r = c.execute("SELECT stored FROM attachments WHERE id=?", (aid,)).fetchone()
+                c.execute("DELETE FROM attachments WHERE id=?", (aid,))
+            if r:
+                try: os.remove(os.path.join(DATA, "attachments", r["stored"]))
+                except Exception: pass
+            return self._json({"ok": True})
         mc = re.match(r"/api/columns/(\d+)$", urlparse(self.path).path)
         if mc:
             cid = int(mc.group(1))
             with db() as c:
-                ids = [r[0] for r in c.execute("SELECT id FROM columns ORDER BY position, id").fetchall()]
-                if cid not in ids: return self._json({"error": "không thấy cột"}, 404)
-                if len(ids) <= 1: return self._json({"error": "phải giữ ít nhất 1 cột"}, 400)
+                crow = c.execute("SELECT project_id FROM columns WHERE id=?", (cid,)).fetchone()
+                if not crow: return self._json({"error": "không thấy cột"}, 404)
+                ids = [r[0] for r in c.execute(
+                    "SELECT id FROM columns WHERE project_id=? ORDER BY position, id", (crow[0],)).fetchall()]
+                if len(ids) <= 1: return self._json({"error": "mỗi dự án phải giữ ít nhất 1 cột"}, 400)
                 fallback = next(i for i in ids if i != cid)
                 c.execute("UPDATE tasks SET column_id=? WHERE column_id=?", (fallback, cid))
                 c.execute("DELETE FROM columns WHERE id=?", (cid,))
             return self._json({"ok": True, "moved_to": fallback})
         m = re.match(r"/api/tasks/(\d+)$", urlparse(self.path).path)
         if not m: return self._json({"error": "not found"}, 404)
-        with db() as c: c.execute("DELETE FROM tasks WHERE id=?", (int(m.group(1)),))
+        tid = int(m.group(1))
+        with db() as c:
+            atts = [r["stored"] for r in c.execute(
+                "SELECT stored FROM attachments WHERE task_id=?", (tid,)).fetchall()]
+            c.execute("DELETE FROM attachments WHERE task_id=?", (tid,))
+            c.execute("DELETE FROM comments WHERE task_id=?", (tid,))
+            c.execute("DELETE FROM tasks WHERE id=?", (tid,))
+        for s in atts:
+            try: os.remove(os.path.join(DATA, "attachments", s))
+            except Exception: pass
         return self._json({"ok": True})
 
 def _win_hotkey_loop():
