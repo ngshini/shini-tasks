@@ -101,6 +101,12 @@ GSK_RENDERER=cairo SHINI_TASKS_THEME=dark SHINI_TASKS_SNAPSHOT=/tmp/shot.png \
 ## 5. Ranh giới
 
 **Luôn làm:**
+- **Đọc trước — ghi lại sau (Sinh chốt 2026-11-16):** trước khi làm bất cứ
+  việc gì, đọc lại các file md liên quan (`muse.md` này, và từ khi có
+  Spec Kit: `.specify/memory/constitution.md` + `spec.md` của tính năng);
+  có sửa gì — code, hành vi, quy định — thì cập nhật ngược vào đúng file
+  md đó. Các file md là nguồn sự thật sống của dự án, không phải giấy
+  viết một lần rồi bỏ.
 - Sửa đúng điểm được chỉ, không tự mở rộng phạm vi.
 - Kiểm chứng trên bản sao dữ liệu / render Xvfb trước khi đụng vào bản thật.
 - Bump đủ 4 nơi khi phát hành: `VERSION` trong `server.py` + `app.py`,
@@ -237,6 +243,21 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   và tối đều rõ. Bài học probe: `get_current_image()` trả Paintable chứ
   không phải Texture (không có save_to_png); ngoại lệ trong callback GLib
   làm app treo tới timeout thay vì thoát — luôn bọc try/finally + quit.
+- **Spec Kit vào dự án (2026-11-16, lệnh của chủ dự án + video tham chiếu
+  anh gửi):** `specify init --here --force` (bản không có `--force` treo
+  ở câu hỏi thư mục-không-trống). **Constitution v1.0.0** ở
+  `.specify/memory/constitution.md` — 7 nguyên tắc (local-first; dữ liệu
+  không bao giờ mất; ghim màu cả hai theme; ghi việc trong vài giây; sửa
+  không mất lặng lẽ; một khung + spec là nguồn sự thật; kiểm chứng trước
+  khi nói xong) + ranh giới cứng + quy trình phát hành. **Spec as-built
+  `specs/001-luong-hoat-dong/spec.md`**: 8 user story theo luồng thật của
+  hệ thống, tiêu chí nghiệm thu dạng Given/When/Then, FR-001…FR-024,
+  SC-001…SC-007, checklist đạt toàn bộ. Quy tắc đứng của chủ dự án (ghi ở
+  mục 5 + skill speckit): việc mới nào cũng dựng khung Spec Kit trước;
+  không hiểu luồng thì hỏi tới khi hiểu mới ghi, điểm mờ dùng thẻ
+  `[NEEDS CLARIFICATION]`; đổi yêu cầu sửa spec → plan → tasks → test →
+  code. Đang dừng ở cổng duyệt specify — plan/tasks theo hướng converge
+  chờ anh duyệt.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 
