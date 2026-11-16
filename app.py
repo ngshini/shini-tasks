@@ -53,7 +53,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.5.0"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.5.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -552,6 +552,8 @@ textview.panenotes text { background: #262B36; color: #EDEDED; }
 .lrow { padding: 5px 8px; border-radius: 10px; }
 .lrow.sel { background: #232A3D; box-shadow: inset 0 0 0 1px #4C8DFF; }
 .lhead { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: #C8C8C8; margin-top: 12px; }
+.subtask { color: #D6D6D6; font-size: 13px; }
+.subtask-done { color: #9A9A9A; font-size: 13px; }
 """
 
 LIGHT_CSS = """
@@ -777,6 +779,8 @@ textview.panenotes text { background: #FFFFFF; color: #171717; }
 .lrow { padding: 5px 8px; border-radius: 10px; }
 .lrow.sel { background: #EAF0FC; box-shadow: inset 0 0 0 1px #2563EB; }
 .lhead { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: #3D4756; margin-top: 12px; }
+.subtask { color: #333333; font-size: 13px; }
+.subtask-done { color: #8A8A8A; font-size: 13px; }
 """
 
 def api(method, path, body=None):
@@ -1182,7 +1186,7 @@ class DetailPane:
     # ---------- Mở / đóng ----------
     def open(self, task, section=None):
         self.task = dict(task)
-        self.win.pane_scroll.set_visible(True)
+        self.win._show_pane()
         self._build()
         vadj = self.win.pane_scroll.get_vadjustment()
         if vadj: vadj.set_value(0)
@@ -1199,7 +1203,7 @@ class DetailPane:
 
     def close(self):
         self.task = None
-        self.win.pane_scroll.set_visible(False)
+        self.win._hide_pane()
 
     def focus_title(self):
         if getattr(self, "e_title", None):
@@ -2870,14 +2874,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.pane = DetailPane(self)
         self.pane_scroll = Gtk.ScrolledWindow()
         self.pane_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.pane_scroll.set_size_request(348, -1)
-        self.pane_scroll.set_hexpand(False)
-        self.pane.box.set_hexpand(False)
         self.pane_scroll.set_child(self.pane.box)
-        self.pane_scroll.set_visible(False)
+        # Chi tiết việc = POPUP nổi giữa cửa sổ (Adw.Dialog) — Sinh chốt
+        # 2026-11-16: panel phải cố định bóp bảng quá hẹp, cứ popup như cũ.
+        self.pane_dialog = Adw.Dialog()
+        self.pane_dialog.set_content_width(560)
+        self.pane_dialog.set_content_height(840)
+        self.pane_dialog.set_child(self.pane_scroll)
+        self._pane_shown = False
+        self.pane_dialog.connect("closed", self._on_pane_closed)
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         body.set_hexpand(True)
-        outer.append(body); outer.append(self.pane_scroll)
+        outer.append(body)
         root.append(outer)
 
         self.toasts = Adw.ToastOverlay()
@@ -3971,6 +3979,23 @@ class MainWindow(Adw.ApplicationWindow):
         self.vh_dot.add_css_class("vhdot")
         self.vh_dot.get_style_context().add_provider(prov, Gtk.STYLE_PROVIDER_PRIORITY_USER)
 
+    def _show_pane(self):
+        if not self._pane_shown:
+            self._pane_shown = True
+            self.pane_dialog.present(self)
+
+    def _hide_pane(self):
+        if self._pane_shown:
+            self.pane_dialog.close()
+
+    def _on_pane_closed(self, *_):
+        self._pane_shown = False
+        self.pane.task = None
+        if self.selected_id is not None:
+            self.selected_id = None
+            self._last_hash = ""
+            self.refresh()
+
     def open_task(self, t, section=None):
         """Mở panel chi tiết bên phải cho việc t (đồng bộ bản mới nhất)."""
         fresh = self._find_task(t["id"]) or t
@@ -4056,7 +4081,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._toast(f"🗓 Đã dời “{t['title']}” → {hm} · {iso[8:10]}/{iso[5:7]}")
         return True
 
-    def _card_meta_markup(self, t):
+    def _card_meta_markup(self, t, count_subs=True):
         """Một dòng meta DUY NHẤT trên thẻ (ngân sách ~5 tín hiệu như các app
         lớn): hạn (màu theo độ khẩn) · 🔁 lặp · ☑ việc con n/m · 💬 · 📎 ·
         ⏱ · 👤. Trường trống thì không hiện gì cả. Trả markup hoặc None."""
@@ -4087,7 +4112,7 @@ class MainWindow(Adw.ApplicationWindow):
         if t.get("repeat_rule") not in (None, "none"):
             bits.append(f'<span foreground="{C["cyan"]}">🔁 lặp</span>')
         subs = t.get("subtasks") or []
-        if subs:
+        if subs and count_subs:
             bits.append(f"☑ {sum(1 for s in subs if s.get('done'))}/{len(subs)}")
         if t.get("comment_count"): bits.append(f"💬 {t['comment_count']}")
         if t.get("attach_count"): bits.append(f"📎 {t['attach_count']}")
@@ -4141,7 +4166,29 @@ class MainWindow(Adw.ApplicationWindow):
         else: title.set_text(t["title"])
         r2.append(title)
         card.append(r2)
-        meta = self._card_meta_markup(t)
+        subs = t.get("subtasks") or []
+        for i, s in enumerate(subs[:6]):
+            srow = Gtk.Box(spacing=6)
+            sc = Gtk.Button(label="✓" if s.get("done") else "")
+            sc.add_css_class("subchk")
+            if s.get("done"): sc.add_css_class("on")
+            sc.set_size_request(14, 14); sc.set_valign(Gtk.Align.START)
+            sc.set_tooltip_text("Tích xong / mở lại việc con này")
+            sc.connect("clicked", lambda *_ , tt=t, ii=i: self._sub_toggle(tt, ii))
+            srow.append(sc)
+            sl = Gtk.Label(xalign=0); sl.set_hexpand(True)
+            sl.add_css_class("subtask-done" if s.get("done") else "subtask")
+            sl.set_ellipsize(Pango.EllipsizeMode.END)
+            txt = GLib.markup_escape_text(s.get("t") or s.get("title") or "")
+            if s.get("done"): sl.set_markup(f"<s>{txt}</s>")
+            else: sl.set_text(s.get("t") or s.get("title") or "")
+            srow.append(sl)
+            card.append(srow)
+        if len(subs) > 6:
+            more = Gtk.Label(label=f"+{len(subs) - 6} việc con nữa…", xalign=0)
+            more.add_css_class("cardmeta")
+            card.append(more)
+        meta = self._card_meta_markup(t, count_subs=False)
         if meta:
             m = Gtk.Label(xalign=0); m.add_css_class("cardmeta")
             m.set_markup(meta)
