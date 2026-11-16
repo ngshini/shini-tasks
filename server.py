@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.5.1"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
+VERSION = "1.6.0"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
 TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
@@ -184,6 +184,23 @@ def init_db():
         cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
         if "pinned" not in cols:
             c.execute("ALTER TABLE tasks ADD COLUMN pinned INTEGER DEFAULT 0")
+        # --- GÓI COOGO v1.6.0 (Sinh 2026-11-16: đưa các tính năng Coogo Flow
+        #     còn thiếu vào Shini Tasks — xem muse.md mục 6) ---
+        cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "rating" not in cols:
+            # Chấm sao 1-5 cho việc đã xong (phê duyệt & đánh giá kiểu Coogo)
+            c.execute("ALTER TABLE tasks ADD COLUMN rating INTEGER DEFAULT 0")
+        if "verdict" not in cols:
+            # '' = chưa duyệt | 'approved' = đã duyệt | 'redo' = yêu cầu làm lại
+            c.execute("ALTER TABLE tasks ADD COLUMN verdict TEXT DEFAULT ''")
+        pcols = [r[1] for r in c.execute("PRAGMA table_info(projects)").fetchall()]
+        if "archived" not in pcols:
+            c.execute("ALTER TABLE projects ADD COLUMN archived INTEGER DEFAULT 0")
+        acols = [r[1] for r in c.execute("PRAGMA table_info(attachments)").fetchall()]
+        if "comment_id" not in acols:
+            # File gắn vào MỘT bình luận cụ thể (chat trong task kiểu Coogo);
+            # NULL = file của việc nói chung như trước.
+            c.execute("ALTER TABLE attachments ADD COLUMN comment_id INTEGER")
 
 init_db()
 
@@ -568,6 +585,70 @@ def evening_preview(now):
         c.execute("INSERT INTO meta(k,v) VALUES(?, '1')", (key,))
     return True
 
+def _meta_get(k):
+    with db() as c:
+        r = c.execute("SELECT v FROM meta WHERE k=?", (k,)).fetchone()
+    return r[0] if r else None
+
+
+def _meta_set(k, v):
+    with db() as c:
+        c.execute("INSERT INTO meta(k, v) VALUES(?,?) "
+                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+
+
+def telegram_send(text):
+    """Gửi 1 tin nhắn về Telegram của CHÍNH người dùng (bot token + chat id
+    họ tự cấu hình trong app). Trả (ok, lỗi). Chưa cấu hình -> (False, 'chưa cấu hình')."""
+    token = _meta_get("tg_token") or ""
+    chat = _meta_get("tg_chat") or ""
+    if not token or not chat:
+        return False, "chưa cấu hình"
+    try:
+        data = json.dumps({"chat_id": chat, "text": text}).encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            out = json.loads(resp.read().decode())
+        return bool(out.get("ok")), "" if out.get("ok") else str(out.get("description") or out)
+    except Exception as e:
+        return False, str(e)
+
+
+_last_tg = {"text": None, "ts": 0.0}
+
+
+def _tg_mirror(title, body):
+    # Khử trùng: notify_task_actions trên Windows gọi lồng notify -> cùng một
+    # nội dung trong 5 giây chỉ gửi Telegram một lần.
+    text = f"{title}\n{body}"
+    now = time.time()
+    if _last_tg["text"] == text and now - _last_tg["ts"] < 5:
+        return
+    _last_tg.update(text=text, ts=now)
+    try:
+        threading.Thread(target=telegram_send, args=(text,), daemon=True).start()
+    except Exception:
+        pass
+
+
+_orig_notify = notify
+
+
+def notify(title, body, urgency="normal"):
+    _orig_notify(title, body, urgency)
+    _tg_mirror(title, body)
+
+
+_orig_notify_actions = notify_task_actions
+
+
+def notify_task_actions(title, body, task_id, urgency="normal"):
+    _orig_notify_actions(title, body, task_id, urgency)
+    _tg_mirror(title, body)
+
+
 def reminder_loop():
     while True:
         try:
@@ -793,6 +874,11 @@ class H(BaseHTTPRequestHandler):
             for t in out:
                 t["comment_count"] = cm.get(t["id"], 0); t["attach_count"] = am.get(t["id"], 0)
             return self._json({"tasks": out})
+        if u.path == "/api/notify-config":
+            tok = _meta_get("tg_token") or ""
+            return self._json({"telegram_chat": _meta_get("tg_chat") or "",
+                               "telegram_token_set": bool(tok),
+                               "telegram_token_tail": tok[-4:] if tok else ""})
         if u.path == "/api/projects":
             with db() as c:
                 prs = [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY position, id").fetchall()]
@@ -806,7 +892,7 @@ class H(BaseHTTPRequestHandler):
                         "SELECT * FROM comments WHERE task_id=? ORDER BY id", (tid,)).fetchall()]
                     return self._json({"comments": rows})
                 rows = [dict(r) for r in c.execute(
-                    "SELECT id,task_id,filename,size,created_at FROM attachments "
+                    "SELECT id,task_id,filename,size,created_at,comment_id FROM attachments "
                     "WHERE task_id=? ORDER BY id", (tid,)).fetchall()]
             return self._json({"attachments": rows})
         m = re.match(r"/api/attachments/(\d+)/download$", u.path)
@@ -1018,6 +1104,9 @@ class H(BaseHTTPRequestHandler):
                 "actual_done_min": sum(t.get("actual_min") or 0 for t in rows if t["status"] == "done"),
                 "estimate_done_min": sum(t.get("estimate_min") or 0 for t in rows if t["status"] == "done"),
                 "timers_running": len([t for t in rows if t.get("timer_start")]),
+                "avg_rating": (lambda rr: round(sum(rr) / len(rr), 1) if rr else 0)(
+                    [t["rating"] for t in rows if t["status"] == "done" and t.get("rating")]),
+                "rated_count": len([t for t in rows if t.get("rating")]),
                 "by_priority": [len([t for t in open_ if t["important"] and t["urgent"]]),
                                 len([t for t in open_ if t["important"] and not t["urgent"]]),
                                 len([t for t in open_ if t["urgent"] and not t["important"]]),
@@ -1032,6 +1121,18 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._auth(): return self._json({"error": "sai token"}, 403)
         u = urlparse(self.path)
+        if u.path == "/api/notify-config":
+            d = self._body()
+            if "telegram_token" in d: _meta_set("tg_token", (d.get("telegram_token") or "").strip())
+            if "telegram_chat" in d: _meta_set("tg_chat", (d.get("telegram_chat") or "").strip())
+            tok = _meta_get("tg_token") or ""
+            return self._json({"telegram_chat": _meta_get("tg_chat") or "",
+                               "telegram_token_set": bool(tok),
+                               "telegram_token_tail": tok[-4:] if tok else ""})
+        if u.path == "/api/notify-test":
+            ok, err = telegram_send("🔔 Shini Tasks — tin nhắn thử. Kênh Telegram đã nối xong, "
+                                    "nhắc việc và bản tin sẽ về đây.")
+            return self._json({"ok": ok, "error": err}, 200 if ok else 400)
         if u.path == "/api/quick":
             d = self._body(); text = (d.get("text") or "").strip()
             if not text: return self._json({"error": "thiếu text"}, 400)
@@ -1282,10 +1383,11 @@ class H(BaseHTTPRequestHandler):
             stored = f"{tid}_{uuid.uuid4().hex[:12]}_{fname}"
             with open(os.path.join(adir, stored), "wb") as f: f.write(raw)
             with db() as c:
-                cur = c.execute("INSERT INTO attachments(task_id, filename, stored, size, created_at) VALUES(?,?,?,?,?)",
+                cur = c.execute("INSERT INTO attachments(task_id, filename, stored, size, created_at, comment_id) VALUES(?,?,?,?,?,?)",
                                 (tid, fname, stored, len(raw),
-                                 datetime.now().isoformat(timespec="seconds")))
-                r = c.execute("SELECT id,task_id,filename,size,created_at FROM attachments WHERE id=?",
+                                 datetime.now().isoformat(timespec="seconds"),
+                                 d.get("comment_id")))
+                r = c.execute("SELECT id,task_id,filename,size,created_at,comment_id FROM attachments WHERE id=?",
                               (cur.lastrowid,)).fetchone()
             return self._json({"attachment": dict(r)}, 201)
         if u.path == "/api/columns":
@@ -1306,7 +1408,7 @@ class H(BaseHTTPRequestHandler):
         if mp:
             d = self._body(); prid = int(mp.group(1))
             sets, vals = [], []
-            for k in ("name", "color", "position"):
+            for k in ("name", "color", "position", "archived"):
                 if k in d: sets.append(f"{k}=?"); vals.append(d[k])
             if sets:
                 with db() as c: c.execute(f"UPDATE projects SET {','.join(sets)} WHERE id=?", vals + [prid])
@@ -1330,7 +1432,7 @@ class H(BaseHTTPRequestHandler):
         fields = {"title":"title","notes":"notes","due_date":"due_date","due_time":"due_time",
                   "estimate_min":"estimate_min","remind_before":"remind_before","repeat_rule":"repeat_rule","repeat_left":"repeat_left","status":"status",
                   "column_id":"column_id","project_id":"project_id","start_date":"start_date",
-                  "assignee":"assignee","pinned":"pinned"}
+                  "assignee":"assignee","pinned":"pinned","rating":"rating","verdict":"verdict"}
         sets, vals = [], []
         for k, col in fields.items():
             if k in d: sets.append(f"{col}=?"); vals.append(d[k])

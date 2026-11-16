@@ -4,7 +4,7 @@ Bảng cột nhắc việc chạy **ngay trên máy của bạn**: dữ liệu l
 không tài khoản, không đám mây. Dữ liệu của bạn không bao giờ rời máy — app chỉ
 tự kiểm tra bản mới trên GitHub mỗi ngày một lần (không gửi kèm dữ liệu cá nhân nào).
 
-![Phiên bản](https://img.shields.io/badge/version-1.5.1-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
+![Phiên bản](https://img.shields.io/badge/version-1.6.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
 
 ## Cài đặt
 
@@ -19,7 +19,13 @@ Cần Python 3 + GTK4 + Libadwaita (PyGObject). Chạy engine `python3 server.py
 (nên đặt làm systemd user service) và app desktop `python3 app.py`.
 
 ## Chức năng chính
-- **Giao diện theo khung chuẩn của các app lớn** (Todoist/Linear/Asana): thanh bên chỉ để điều hướng (Thêm việc · Tìm kiếm · mục thông minh · Đã ghim · Dự án), chuyển Bảng / Danh sách / Lịch / Hôm nay / Thống kê bằng tab, thanh trên chỉ có đúng một nút **＋ Việc mới**.
+- **Giao diện theo khung chuẩn của các app lớn** (Todoist/Linear/Asana): thanh bên chỉ để điều hướng (Thêm việc · Tìm kiếm · mục thông minh · Đã ghim · Dự án), chuyển Bảng / Danh sách / Lịch / **Gantt** / **Sơ đồ** / Hôm nay / Thống kê bằng tab, thanh trên chỉ có đúng một nút **＋ Việc mới**.
+- **Sơ đồ phân rã (mindmap) + Gantt**: tab Sơ đồ vẽ cây Dự án → Cột → Việc → Việc con (bấm vào việc là mở chi tiết); tab Gantt vẽ thanh thời gian từ ngày bắt đầu tới hạn, có đường "hôm nay" và viền đỏ cho việc quá hạn.
+- **Đánh giá & phê duyệt**: trong popup chi tiết, chấm 1–5 sao và đặt trạng thái duyệt (Chưa duyệt / Đã duyệt / Làm lại) cho từng việc; trang Thống kê hiện điểm trung bình.
+- **Bình luận kèm file/ảnh/video**: gắn file vào từng bình luận (ảnh hiện xem trước ngay trong popup) — trao đổi không trôi như chat trong task.
+- **Thông báo Telegram (tuỳ chọn)**: nối bot Telegram của chính bạn trong ⚙ Cài đặt ở thanh bên — nhắc việc, quá hạn và bản tin sáng/tối sẽ về điện thoại, kể cả khi máy tính đang tắt.
+- **AI Gemini điền form (tuỳ chọn)**: dán API key Gemini (miễn phí) trong ⚙ Cài đặt, rồi ở ô thêm nhanh gõ một câu tiếng Việt tự nhiên và bấm **✨ AI** — AI tự điền tiêu đề, hạn, giờ, ưu tiên, nhãn và gợi ý việc con.
+- **Lưu trữ dự án**: ẩn dự án đã xong khỏi thanh bên (dữ liệu giữ nguyên, khôi phục bất cứ lúc nào ở mục 📦 Đã lưu trữ).
 - **Chi tiết việc dạng popup**: bấm vào một việc là mở popup ngay giữa màn hình — mọi trường (hạn, ưu tiên, cột, lặp, việc con, file, bình luận, bấm giờ) sửa tại chỗ và **tự lưu ngay**. Ghim việc quan trọng lên mục **Đã ghim** ở thanh bên bằng nút 📌.
 - **Nhiều dự án**: mỗi dự án có bộ cột Kanban riêng; thanh bên hiện chấm màu + vòng tiến độ + số việc đang mở cho từng dự án.
 - **Bảng cột tuỳ biến**: tự thêm/đổi tên/đổi màu cột, kéo-thả việc giữa các cột; thẻ việc hiện cờ ưu tiên, tiêu đề, **danh sách việc con (bấm vòng tròn để tích ngay trên thẻ)** và một dòng thông tin (hạn tô đỏ khi quá hạn · 💬 · 📎). Việc đã xong xem riêng ở mục **Đã xong** dưới thanh bên.

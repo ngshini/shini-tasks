@@ -19,6 +19,10 @@ if sys.platform.startswith("win"):
         try: _s.reconfigure(encoding="utf-8", errors="replace")
         except Exception: pass
 
+try:
+    import cairo
+except Exception:
+    cairo = None
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -53,7 +57,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.5.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.6.0"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -158,6 +162,8 @@ button.subchk { min-width: 13px; min-height: 13px; padding: 0; border-radius: 99
 button.subchk:hover { border-color: #34D399; }
 button.subchk.on { background: #34D399; border-color: #34D399; }
 .subtask { color: #D6D6D6; font-size: 13px; }
+button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; border: none; box-shadow: none; color: #6E7B8F; }
+button.starbtn.on { color: #FBBF24; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #9A9A9A; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #232323; padding: 8px 10px; }
@@ -613,6 +619,8 @@ button.subchk { min-width: 13px; min-height: 13px; padding: 0; border-radius: 99
 button.subchk:hover { border-color: #059669; }
 button.subchk.on { background: #059669; border-color: #059669; }
 .subtask { color: #333333; font-size: 13px; }
+button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; border: none; box-shadow: none; color: #B6BEC9; }
+button.starbtn.on { color: #D97706; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #59636E; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #E7E7E3; padding: 8px 10px; }
@@ -1415,6 +1423,24 @@ class DetailPane:
         trow2.append(self.timer_btn)
         self.box.append(self._frow("Làm thật", trow2))
         self._sync_timer_ui()
+        # --- Đánh giá & phê duyệt (gói Coogo v1.6.0) ---
+        self.box.append(Gtk.Label(label="ĐÁNH GIÁ", xalign=0, css_classes=["pane-h"]))
+        srow = Gtk.Box(spacing=2)
+        self._star_btns = []
+        for i in range(1, 6):
+            on = (t.get("rating") or 0) >= i
+            sb_ = Gtk.Button(label="★" if on else "☆")
+            sb_.add_css_class("starbtn")
+            if on: sb_.add_css_class("on")
+            sb_.set_tooltip_text(f"Chấm {i} sao (bấm lại sao đang chọn để bỏ chấm)")
+            sb_.connect("clicked", lambda *_ , n=i: self._set_rating(n))
+            self._star_btns.append(sb_)
+            srow.append(sb_)
+        self.box.append(self._frow("Chấm sao", srow))
+        self.d_verdict = Gtk.DropDown.new_from_strings(["Chưa duyệt", "Đã duyệt ✓", "Làm lại ↺"])
+        self.d_verdict.set_selected({"": 0, "approved": 1, "redo": 2}.get(t.get("verdict") or "", 0))
+        self.d_verdict.connect("notify::selected", self._on_verdict)
+        self.box.append(self._frow("Phê duyệt", self.d_verdict))
         # --- Mô tả ---
         self.box.append(Gtk.Label(label="MÔ TẢ", xalign=0, css_classes=["pane-h"]))
         frame = Gtk.Frame()
@@ -1461,10 +1487,22 @@ class DetailPane:
         crow = Gtk.Box(spacing=6)
         self.e_cmt = Gtk.Entry(placeholder_text="Viết bình luận…"); self.e_cmt.set_hexpand(True)
         self.e_cmt.connect("activate", self._add_comment)
+        catt = Gtk.Button(label="📎"); catt.add_css_class("dlgbtn")
+        catt.set_tooltip_text("Gắn file / ảnh / video vào bình luận này")
+        catt.connect("clicked", self._pick_cmt_file)
         csend = Gtk.Button(label="Gửi"); csend.add_css_class("dlgbtn")
         csend.connect("clicked", self._add_comment)
-        crow.append(self.e_cmt); crow.append(csend)
+        crow.append(self.e_cmt); crow.append(catt); crow.append(csend)
         sec_cmt.append(crow)
+        self._cmt_file = None
+        self.cmt_file_row = Gtk.Box(spacing=6)
+        self.cmt_file_lab = Gtk.Label(label="", xalign=0); self.cmt_file_lab.add_css_class("mut")
+        self.cmt_file_lab.set_hexpand(True); self.cmt_file_lab.set_ellipsize(Pango.EllipsizeMode.END)
+        cx = Gtk.Button(label="✕"); cx.add_css_class("mini"); cx.add_css_class("flat")
+        cx.connect("clicked", lambda *_: self._stage_cmt_file(None))
+        self.cmt_file_row.append(self.cmt_file_lab); self.cmt_file_row.append(cx)
+        self.cmt_file_row.set_visible(False)
+        sec_cmt.append(self.cmt_file_row)
         self.box.append(sec_cmt)
         self._sec["comments"] = sec_cmt
         self._load_comments(); self._load_attachments()
@@ -1793,10 +1831,31 @@ class DetailPane:
             self.sub_head.set_text(f"VIỆC CON · {sum(1 for s in subs if s.get('done'))}/{len(subs)}")
 
     # ---------- Bình luận ----------
+    def _set_rating(self, n):
+        if not self.task: return
+        new = 0 if (self.task.get("rating") or 0) == n else n
+        self._patch({"rating": new})
+        for i, b in enumerate(self._star_btns, 1):
+            b.set_label("★" if new >= i else "☆")
+            (b.add_css_class if new >= i else b.remove_css_class)("on")
+        self.win.refresh()
+
+    def _on_verdict(self, *_):
+        if self._guard or not self.task: return
+        v = ["", "approved", "redo"][self.d_verdict.get_selected()]
+        if v != (self.task.get("verdict") or ""):
+            self._patch({"verdict": v})
+            self.win.refresh()
+
     def _load_comments(self):
         for c in _kids(self.cmt_list): self.cmt_list.remove(c)
         try: rows = api("GET", f"/api/tasks/{self.task['id']}/comments")["comments"]
         except Exception: rows = []
+        try: atts = api("GET", f"/api/tasks/{self.task['id']}/attachments")["attachments"]
+        except Exception: atts = []
+        by_cmt = {}
+        for a in atts:
+            if a.get("comment_id"): by_cmt.setdefault(a["comment_id"], []).append(a)
         if not rows:
             self.cmt_list.append(Gtk.Label(label="Chưa có bình luận nào.", xalign=0, css_classes=["mut"]))
             return
@@ -1817,15 +1876,82 @@ class DetailPane:
             vb.append(hr)
             tx = Gtk.Label(label=cm.get("content") or "", xalign=0, wrap=True); tx.add_css_class("cmttext")
             vb.append(tx)
+            for a in by_cmt.get(cm["id"], []):
+                vb.append(self._cmt_attachment_widget(a))
             self.cmt_list.append(vb)
+
+    def _cmt_attachment_widget(self, a):
+        import os.path as _p
+        ext = _p.splitext(a["filename"])[1].lower()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
+            try:
+                cache = os.path.join(GLib.get_tmp_dir(), "shini-cmt-media")
+                os.makedirs(cache, exist_ok=True)
+                path = os.path.join(cache, f"{a['id']}_{a['filename']}")
+                if not os.path.exists(path):
+                    open(path, "wb").write(api_raw(f"/api/attachments/{a['id']}/download"))
+                pic = Gtk.Picture.new_for_filename(path)
+                pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+                pic.set_size_request(210, 140); pic.set_halign(Gtk.Align.START)
+                box.append(pic)
+            except Exception: pass
+        row = Gtk.Box(spacing=6)
+        icon = "🎬" if ext in (".mp4", ".mov", ".webm", ".mkv") else "📄"
+        nm = Gtk.Label(label=f"{icon} {a['filename']}", xalign=0); nm.set_hexpand(True)
+        nm.set_ellipsize(Pango.EllipsizeMode.END)
+        row.append(nm)
+        dl = Gtk.Button(label="⬇ Tải"); dl.add_css_class("mini"); dl.add_css_class("flat")
+        dl.connect("clicked", lambda *_ , aa=a: self._download_attachment(aa))
+        row.append(dl)
+        rm = Gtk.Button(label="✕"); rm.add_css_class("mini"); rm.add_css_class("flat")
+        rm.connect("clicked", lambda *_ , aid=a["id"]: self._del_cmt_attachment(aid))
+        row.append(rm)
+        box.append(row)
+        return box
+
+    def _del_cmt_attachment(self, aid):
+        try: api("DELETE", f"/api/attachments/{aid}")
+        except Exception: return
+        self._load_comments(); self._load_attachments(); self.win.refresh()
+
+    def _pick_cmt_file(self, *_):
+        dlg = Gtk.FileDialog(title="Chọn file gắn vào bình luận")
+        dlg.open(self.win, None, self._cmt_file_chosen)
+
+    def _cmt_file_chosen(self, dlg, res):
+        try: f = dlg.open_finish(res)
+        except Exception: return
+        path = f.get_path()
+        if path: self._stage_cmt_file(path)
+
+    def _stage_cmt_file(self, path):
+        self._cmt_file = path
+        if path:
+            self.cmt_file_lab.set_text("📎 " + os.path.basename(path) + " — sẽ gửi cùng bình luận")
+            self.cmt_file_row.set_visible(True)
+        else:
+            self.cmt_file_row.set_visible(False)
 
     def _add_comment(self, *_):
         txt = self.e_cmt.get_text().strip()
-        if not txt: return
+        if not txt and not self._cmt_file: return
+        if not txt: txt = "📎 File đính kèm"
         try:
-            api("POST", f"/api/tasks/{self.task['id']}/comments",
-                {"author": SETTINGS.get("display_name") or "Bạn", "content": txt})
+            r = api("POST", f"/api/tasks/{self.task['id']}/comments",
+                    {"author": SETTINGS.get("display_name") or "Bạn", "content": txt})
         except Exception: return
+        cm = (r or {}).get("comment") or {}
+        if self._cmt_file and cm.get("id"):
+            try:
+                import base64
+                data = open(self._cmt_file, "rb").read()
+                api("POST", f"/api/tasks/{self.task['id']}/attachments",
+                    {"filename": os.path.basename(self._cmt_file),
+                     "data_b64": base64.b64encode(data).decode(),
+                     "comment_id": cm["id"]})
+            except Exception: pass
+        self._stage_cmt_file(None)
         self.e_cmt.set_text("")
         self._load_comments(); self.win.refresh()
 
@@ -1839,6 +1965,7 @@ class DetailPane:
         for c in _kids(self.att_list): self.att_list.remove(c)
         try: rows = api("GET", f"/api/tasks/{self.task['id']}/attachments")["attachments"]
         except Exception: rows = []
+        rows = [a for a in rows if not a.get("comment_id")]
         if not rows:
             self.att_list.append(Gtk.Label(label="Chưa có file nào.", xalign=0, css_classes=["mut"]))
             return
@@ -1899,6 +2026,137 @@ class DetailPane:
         except Exception: return
         self._load_attachments(); self.win.refresh()
 
+
+
+class ArchivedProjectsDialog(Gtk.Window):
+    """Dự án đã lưu trữ (gói Coogo v1.6.0): xem danh sách + khôi phục.
+    Lưu trữ chỉ ẩn dự án khỏi thanh bên — việc và dữ liệu giữ nguyên."""
+
+    def __init__(self, parent, on_changed):
+        super().__init__(title="Dự án đã lưu trữ", transient_for=parent, modal=True)
+        self.win, self.on_changed = parent, on_changed
+        self.set_default_size(420, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(16); box.set_margin_end(16)
+        box.append(Gtk.Label(label="Dự án đã lưu trữ chỉ bị ẩn khỏi thanh bên — "
+                                   "mọi việc bên trong vẫn nguyên vẹn.",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.append(self.list_box)
+        self.set_child(box)
+        self._reload()
+
+    def _reload(self):
+        for c in _kids(self.list_box): self.list_box.remove(c)
+        arch = [p for p in self.win.projects if p.get("archived")]
+        if not arch:
+            self.list_box.append(Gtk.Label(label="Chưa có dự án nào được lưu trữ.",
+                                           xalign=0, css_classes=["mut"]))
+            return
+        for p in arch:
+            row = Gtk.Box(spacing=8)
+            lab = Gtk.Label(label="📦 " + p["name"], xalign=0); lab.set_hexpand(True)
+            row.append(lab)
+            b = Gtk.Button(label="↩ Khôi phục"); b.add_css_class("dlgbtn")
+            b.connect("clicked", lambda *_ , pp=p: self._restore(pp))
+            row.append(b)
+            self.list_box.append(row)
+
+    def _restore(self, p):
+        try: api("PATCH", f"/api/projects/{p['id']}", {"archived": 0})
+        except Exception: return
+        self.on_changed()
+        self._reload()
+
+
+class SettingsDialog(Gtk.Window):
+    """Cài đặt (gói Coogo v1.6.0): thông báo Telegram về điện thoại của chính
+    người dùng + API key Gemini cho nút ✨ AI điền form. Token/key chỉ lưu
+    trên máy này (Telegram token nằm ở engine local, Gemini key ở settings)."""
+
+    def __init__(self, parent):
+        super().__init__(title="Cài đặt — Telegram & AI", transient_for=parent, modal=True)
+        self.win = parent
+        self.set_default_size(480, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(16); box.set_margin_end(16)
+        box.append(Gtk.Label(label="TELEGRAM — NHẮC VIỆC VỀ ĐIỆN THOẠI", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Cách nối: mở Telegram → tìm @BotFather → /newbot để tạo bot, "
+                                   "copy token dán vào đây. Nhắn cho bot 1 tin bất kỳ, rồi mở "
+                                   "@userinfobot để lấy Chat ID của bạn. Nhắc việc, quá hạn và "
+                                   "bản tin sáng/tối sẽ về Telegram (kèm thông báo trên máy như cũ).",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        self.tg_status = Gtk.Label(label="", xalign=0, css_classes=["mut"])
+        box.append(self.tg_status)
+        self.e_tg_token = Gtk.Entry(placeholder_text="Token bot Telegram…")
+        self.e_tg_token.set_visibility(False)
+        box.append(self.e_tg_token)
+        self.e_tg_chat = Gtk.Entry(placeholder_text="Chat ID của bạn (vd 123456789)…")
+        box.append(self.e_tg_chat)
+        trow = Gtk.Box(spacing=8)
+        bsave = Gtk.Button(label="Lưu Telegram"); bsave.add_css_class("dlgbtn")
+        bsave.connect("clicked", self._save_tg)
+        trow.append(bsave)
+        btest = Gtk.Button(label="Gửi thử"); btest.add_css_class("dlgbtn")
+        btest.connect("clicked", self._test_tg)
+        trow.append(btest)
+        self.tg_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
+        trow.append(self.tg_result)
+        box.append(trow)
+        box.append(Gtk.Label(label="AI GEMINI — NÚT ✨ ĐIỀN FORM", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Tạo API key miễn phí tại aistudio.google.com/apikey rồi dán vào đây. "
+                                   "Có key rồi, ở ô Thêm nhanh cứ gõ một câu tiếng Việt tự nhiên và "
+                                   "bấm ✨ AI — AI sẽ tự điền tiêu đề, hạn, giờ, ưu tiên, nhãn và gợi ý việc con.",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        self.e_gem = Gtk.Entry(placeholder_text="Gemini API key…")
+        self.e_gem.set_visibility(False)
+        self.e_gem.set_text(SETTINGS.get("gemini_key") or "")
+        box.append(self.e_gem)
+        brow = Gtk.Box(spacing=8)
+        bgem = Gtk.Button(label="Lưu key AI"); bgem.add_css_class("dlgbtn")
+        bgem.connect("clicked", self._save_gem)
+        brow.append(bgem)
+        self.gem_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
+        brow.append(self.gem_result)
+        box.append(brow)
+        self.set_child(box)
+        self._load_tg()
+
+    def _load_tg(self):
+        try: cfg = api("GET", "/api/notify-config")
+        except Exception: cfg = {}
+        self.e_tg_chat.set_text(cfg.get("telegram_chat") or "")
+        if cfg.get("telegram_token_set"):
+            self.tg_status.set_text(f"Đã nối Telegram (token ••••{cfg.get('telegram_token_tail', '')}). "
+                                    "Để trống ô token nếu giữ nguyên.")
+        else:
+            self.tg_status.set_text("Chưa cấu hình Telegram.")
+
+    def _save_tg(self, *_):
+        body = {"telegram_chat": self.e_tg_chat.get_text().strip()}
+        tok = self.e_tg_token.get_text().strip()
+        if tok: body["telegram_token"] = tok
+        try:
+            api("POST", "/api/notify-config", body)
+            self.tg_result.set_text("Đã lưu ✓")
+            self._load_tg()
+        except Exception:
+            self.tg_result.set_text("Lưu không được — engine chưa chạy?")
+
+    def _test_tg(self, *_):
+        self._save_tg()
+        try:
+            r = api("POST", "/api/notify-test")
+            self.tg_result.set_text("Đã gửi tin thử ✓ — xem Telegram" if r.get("ok") else "Gửi chưa được")
+        except Exception as e:
+            self.tg_result.set_text("Gửi chưa được — kiểm tra token/chat id")
+
+    def _save_gem(self, *_):
+        SETTINGS["gemini_key"] = self.e_gem.get_text().strip()
+        save_settings(SETTINGS)
+        self.gem_result.set_text("Đã lưu key ✓")
 
 
 class ColumnDialog(Gtk.Window):
@@ -2630,6 +2888,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.stats = {}
         self.q_text = ""
         self.f_tag = None
+        self.f_assignee = None
         self.f_overdue = False
         self.f_date = None
         self.sort_mode = 0
@@ -2709,6 +2968,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.tag_drop = Gtk.DropDown.new_from_strings(["Tất cả nhãn"])
         self.tag_drop.connect("notify::selected", self._on_tag)
         fbox.append(self.tag_drop)
+        fbox.append(Gtk.Label(label="Người làm", xalign=0, css_classes=["mut"]))
+        self.assignee_drop = Gtk.DropDown.new_from_strings(["Tất cả mọi người"])
+        self.assignee_drop.connect("notify::selected", self._on_assignee)
+        fbox.append(self.assignee_drop)
         fbox.append(Gtk.Label(label="Sắp xếp", xalign=0, css_classes=["mut"]))
         self.sort_drop = Gtk.DropDown.new_from_strings(["Sắp xếp: Ưu tiên", "Sắp xếp: Hạn gần nhất"])
         self.sort_drop.connect("notify::selected", self._on_sort)
@@ -2745,14 +3008,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.btn_list = Gtk.ToggleButton(label="☰ Danh sách"); self.btn_list.add_css_class("viewtab")
         self.btn_cal = Gtk.ToggleButton(label="📅 Lịch"); self.btn_cal.add_css_class("viewtab")
         self.btn_today = Gtk.ToggleButton(label="☀ Hôm nay"); self.btn_today.add_css_class("viewtab")
+        self.btn_gantt = Gtk.ToggleButton(label="▤ Gantt"); self.btn_gantt.add_css_class("viewtab")
+        self.btn_map = Gtk.ToggleButton(label="🗺 Sơ đồ"); self.btn_map.add_css_class("viewtab")
         self.btn_stats = Gtk.ToggleButton(label="📊 Thống kê"); self.btn_stats.add_css_class("viewtab")
         self.btn_board.set_active(True); self.btn_board.add_css_class("viewtab-on")
         self.btn_board.connect("toggled", lambda b: self._set_view("board") if b.get_active() else None)
         self.btn_list.connect("toggled", lambda b: self._set_view("list") if b.get_active() else None)
         self.btn_cal.connect("toggled", lambda b: self._set_view("calendar") if b.get_active() else None)
         self.btn_today.connect("toggled", lambda b: self._set_view("today") if b.get_active() else None)
+        self.btn_gantt.connect("toggled", lambda b: self._set_view("gantt") if b.get_active() else None)
+        self.btn_map.connect("toggled", lambda b: self._set_view("mindmap") if b.get_active() else None)
         self.btn_stats.connect("toggled", lambda b: self._set_view("stats") if b.get_active() else None)
-        for _b in (self.btn_board, self.btn_list, self.btn_cal, self.btn_today, self.btn_stats): tabs.append(_b)
+        for _b in (self.btn_board, self.btn_list, self.btn_cal, self.btn_today,
+                   self.btn_gantt, self.btn_map, self.btn_stats): tabs.append(_b)
         vh.append(tabs)
         qrow = Gtk.Box(spacing=8)
         self.quick = Gtk.Entry(placeholder_text="Thêm nhanh…")
@@ -2761,7 +3029,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.quick.connect("changed", self._on_quick_changed)
         bq = Gtk.Button(label="Thêm"); bq.add_css_class("suggested-action")
         bq.connect("clicked", self._quick_add)
-        qrow.append(self.quick); qrow.append(bq)
+        self.ai_btn = Gtk.Button(label="✨ AI"); self.ai_btn.add_css_class("dlgbtn")
+        self.ai_btn.set_tooltip_text("AI Gemini đọc câu tiếng Việt và tự điền form việc (tiêu đề, hạn, ưu tiên, việc con…) — cần API key trong ⚙ Cài đặt ở thanh bên")
+        self.ai_btn.connect("clicked", self._quick_ai)
+        qrow.append(self.quick); qrow.append(bq); qrow.append(self.ai_btn)
         vh.append(qrow)
         self.quick_preview = Gtk.Label(label="", xalign=0); self.quick_preview.add_css_class("preview")
         self.quick_preview.set_visible(False)
@@ -2859,13 +3130,29 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.add_named(cal_page, "calendar")
         self.stack.add_named(today_scroll, "today")
         self.stack.add_named(stats_scroll, "stats")
-        if os.environ.get("SHINI_TASKS_VIEW") in ("calendar", "today", "stats", "list"):
+        # Trang GANTT (gói Coogo v1.6.0): thanh thời gian bắt đầu -> hạn
+        self.gantt_area = Gtk.DrawingArea()
+        self.gantt_area.set_draw_func(self._gantt_draw)
+        _gg = Gtk.GestureClick(); _gg.connect("released", self._gantt_click)
+        self.gantt_area.add_controller(_gg)
+        gantt_scroll = Gtk.ScrolledWindow(); gantt_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        gantt_scroll.set_child(self.gantt_area)
+        self.stack.add_named(gantt_scroll, "gantt")
+        # Trang SƠ ĐỒ (mindmap Dự án -> Cột -> Việc -> Việc con)
+        self.map_area = Gtk.DrawingArea()
+        self.map_area.set_draw_func(self._map_draw)
+        _mg = Gtk.GestureClick(); _mg.connect("released", self._map_click)
+        self.map_area.add_controller(_mg)
+        map_scroll = Gtk.ScrolledWindow(); map_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        map_scroll.set_child(self.map_area)
+        self.stack.add_named(map_scroll, "mindmap")
+        if os.environ.get("SHINI_TASKS_VIEW") in ("calendar", "today", "stats", "list", "gantt", "mindmap"):
             vm = os.environ["SHINI_TASKS_VIEW"]
             self.view_mode = vm
             self.stack.set_visible_child_name(vm)
             self.btn_board.set_active(False); self.btn_board.remove_css_class("viewtab-on")
             on = {"calendar": self.btn_cal, "today": self.btn_today, "stats": self.btn_stats,
-                  "list": self.btn_list}[vm]
+                  "list": self.btn_list, "gantt": self.btn_gantt, "mindmap": self.btn_map}[vm]
             on.set_active(True); on.add_css_class("viewtab-on")
         main.append(self.stack)
         body.set_end_child(main)
@@ -2984,7 +3271,7 @@ class MainWindow(Adw.ApplicationWindow):
         # menu ⋯. Cột KHÔNG còn lồng dưới dự án (bảng tự nó đã hiện cột; muốn
         # chỉ xem 1 cột thì bấm vào TIÊU ĐỀ cột trên bảng).
         for c in _kids(self.proj_box): self.proj_box.remove(c)
-        for p in self.projects:
+        for p in [p for p in self.projects if not p.get("archived")]:
             n = sum(1 for t in self.all_tasks if t["status"] != "done" and t.get("project_id") == p["id"])
             nd = sum(1 for t in self.all_tasks if t["status"] == "done" and t.get("project_id") == p["id"])
             b = Gtk.Button(); b.add_css_class("colrow")
@@ -3013,6 +3300,9 @@ class MainWindow(Adw.ApplicationWindow):
             eb = Gtk.Button(label="✎ Đổi tên & màu"); eb.add_css_class("flat"); eb.add_css_class("dlgflat")
             eb.connect("clicked", lambda *_ , pp=p: (pop.popdown(), ProjectDialog(self, pp, self.refresh).present()))
             pbox.append(eb)
+            ab = Gtk.Button(label="📦 Lưu trữ dự án"); ab.add_css_class("flat"); ab.add_css_class("dlgflat")
+            ab.connect("clicked", lambda *_ , pp=p: (pop.popdown(), self._archive_project(pp)))
+            pbox.append(ab)
             if len(self.projects) > 1:
                 db = Gtk.Button(label="🗑 Xoá dự án"); db.add_css_class("flat"); db.add_css_class("dlgflat")
                 db.connect("clicked", lambda *_ , pp=p: (pop.popdown(), self._ask_del_project(pp)))
@@ -3024,6 +3314,25 @@ class MainWindow(Adw.ApplicationWindow):
             b.set_tooltip_text("Bấm để xem bảng của dự án này")
             b.connect("clicked", lambda *_ , pid=p["id"]: self._set_project(pid))
             self.proj_box.append(b)
+        _arch = [p for p in self.projects if p.get("archived")]
+        if _arch:
+            ab2 = Gtk.Button(label=f"📦 Đã lưu trữ ({len(_arch)})")
+            ab2.add_css_class("flat"); ab2.add_css_class("renamebtn")
+            _al = ab2.get_child()
+            if _al: _al.set_xalign(0)
+            ab2.set_tooltip_text("Xem và khôi phục các dự án đã lưu trữ")
+            ab2.connect("clicked", lambda *_: ArchivedProjectsDialog(self, self.refresh).present())
+            self.proj_box.append(ab2)
+
+    def _archive_project(self, p):
+        try: api("PATCH", f"/api/projects/{p['id']}", {"archived": 1})
+        except Exception: return
+        if self.cur_project == p["id"]:
+            rest = [q for q in self.projects if q["id"] != p["id"] and not q.get("archived")]
+            if rest: self._set_project(rest[0]["id"])
+        self._toast(f"📦 Đã lưu trữ dự án “{p['name']}” — khôi phục ở mục 📦 Đã lưu trữ dưới danh sách dự án")
+        self._last_hash = ""
+        self.refresh()
 
     def _ask_del_project(self, p):
         dlg = Gtk.AlertDialog()
@@ -3112,6 +3421,8 @@ class MainWindow(Adw.ApplicationWindow):
              lambda *_: LabelsDialog(self, self.refresh).present()),
             ("⇄  Đồng bộ · Sao lưu", "Đồng bộ với máy kia qua Tailscale, xuất/nhập JSON, khôi phục sao lưu (engine cũng tự sao lưu mỗi ngày)",
              lambda *_: SyncDialog(self, self.refresh).present()),
+            ("⚙  Cài đặt · Telegram & AI", "Nối Telegram để nhắc việc về điện thoại + API key Gemini cho nút ✨ AI điền form",
+             lambda *_: SettingsDialog(self).present()),
         ]:
             b = Gtk.Button(label=label); b.add_css_class("sb2row")
             _bl = b.get_child()
@@ -3192,7 +3503,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.search.set_text("")
         self.tag_drop.set_selected(0)
         self._updating = False
-        self.q_text = ""; self.f_tag = None; self.f_date = None
+        self.q_text = ""; self.f_tag = None; self.f_date = None; self.f_assignee = None
+        self.assignee_drop.set_selected(0)
         if self.f_overdue:
             self.f_overdue = False; self.over_btn.set_active(False)
         self.refresh()
@@ -3239,6 +3551,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not self._smart_ok(t, self.smart): return False
         if self.q_text and self.q_text.lower() not in (t["title"] + " " + (t.get("notes") or "")).lower(): return False
         if self.f_tag and self.f_tag not in (t.get("tags") or []): return False
+        if self.f_assignee and (t.get("assignee") or "") != self.f_assignee: return False
         if self.f_overdue and not is_overdue(t): return False
         if self.f_date and t.get("due_date") != self.f_date: return False
         return True
@@ -3256,6 +3569,13 @@ class MainWindow(Adw.ApplicationWindow):
         i = self.tag_drop.get_selected()
         self.f_tag = tags[i] if 0 < i <= len(tags) else None
         self.refresh()
+    def _on_assignee(self, *_):
+        if getattr(self, "_updating", False): return
+        people = getattr(self, "_people_cache", [])
+        i = self.assignee_drop.get_selected()
+        self.f_assignee = people[i - 1] if 0 < i <= len(people) else None
+        self.refresh()
+
     def _on_sort(self, *_):
         self.sort_mode = self.sort_drop.get_selected(); self.refresh()
     def _on_over(self, *_):
@@ -3429,8 +3749,16 @@ class MainWindow(Adw.ApplicationWindow):
         if self.f_tag in tags: self.tag_drop.set_selected(tags.index(self.f_tag) + 1)
         elif cur and cur <= len(tags): self.tag_drop.set_selected(cur)
         self._updating = False
+        _people = sorted({t["assignee"] for t in self.all_tasks if t.get("assignee")})
+        if getattr(self, "_people_cache", None) != _people:
+            self._people_cache = _people
+            self._updating = True
+            self.assignee_drop.set_model(Gtk.StringList.new(["Tất cả mọi người"] + _people))
+            if self.f_assignee in _people:
+                self.assignee_drop.set_selected(_people.index(self.f_assignee) + 1)
+            self._updating = False
         shown = [t for t in self.all_tasks if self._passes(t)]
-        filtering = bool(self.q_text or self.f_tag or self.f_overdue or self.f_date
+        filtering = bool(self.q_text or self.f_tag or self.f_assignee or self.f_overdue or self.f_date
                          or self.smart != "all" or self.focus_col is not None)
         # Bảng cột chỉ hiện việc + cột của DỰ ÁN đang chọn (các góc nhìn khác —
         # Hôm nay / Lịch / Thống kê — vẫn gồm mọi dự án)
@@ -3441,6 +3769,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.smart != "all": bits.append(f"mục {smart_names.get(self.smart, '')}")
         if self.q_text: bits.append(f"tìm “{self.q_text}”")
         if self.f_tag: bits.append(f"nhãn #{self.f_tag}")
+        if self.f_assignee: bits.append(f"người làm: {self.f_assignee}")
         if self.f_overdue: bits.append("chỉ quá hạn")
         if self.f_date: bits.append(f"ngày {self.f_date[8:10]}/{self.f_date[5:7]} (bấm lại ngày đó để bỏ lọc)")
         self.filter_lab.set_text(("Đang lọc: " + " · ".join(bits)) if bits else "")
@@ -3478,6 +3807,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_month()
         if self.view_mode == "calendar": self._render_calendar()
         if self.view_mode == "today": self._render_today()
+        if self.view_mode == "gantt": self._render_gantt()
+        if self.view_mode == "mindmap": self._render_mindmap()
         if self.view_mode == "stats": self._render_stats()
 
     # ---------- Chế độ LỊCH (lưới thời gian kiểu Google Calendar) ----------
@@ -3490,13 +3821,16 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             self.view_mode = mode
             for btn, m in ((self.btn_board, "board"), (self.btn_list, "list"), (self.btn_cal, "calendar"),
-                           (self.btn_today, "today"), (self.btn_stats, "stats")):
+                           (self.btn_today, "today"), (self.btn_gantt, "gantt"),
+                           (self.btn_map, "mindmap"), (self.btn_stats, "stats")):
                 btn.set_active(m == mode)
                 (btn.add_css_class if m == mode else btn.remove_css_class)("viewtab-on")
             self.stack.set_visible_child_name(mode)
             if mode == "list": self._render_list()
             if mode == "calendar": self._render_calendar()
             if mode == "today": self._render_today()
+            if mode == "gantt": self._render_gantt()
+            if mode == "mindmap": self._render_mindmap()
             if mode == "stats": self._render_stats()
         finally:
             self._switching = False
@@ -3588,6 +3922,10 @@ class MainWindow(Adw.ApplicationWindow):
                    f"ước lượng: {s.get('estimate_done_min', 0)} phút")
             if s.get("timers_running"): _tl += f" · ⏱ đang bấm giờ {s['timers_running']} việc"
             box.append(Gtk.Label(label=_tl, xalign=0, css_classes=["mut"]))
+        if s.get("rated_count"):
+            box.append(Gtk.Label(label=f"⭐ Đánh giá việc đã xong: trung bình {s.get('avg_rating', 0)}/5 "
+                                       f"qua {s['rated_count']} việc đã chấm sao (chấm trong popup chi tiết)",
+                                 xalign=0, css_classes=["mut"]))
         # Theo TRẠNG THÁI + theo MỨC ƯU TIÊN (gói KimesFlow: dashboard phân tích)
         bs = s.get("by_status") or {}
         bp = s.get("by_priority") or []
@@ -4200,6 +4538,233 @@ class MainWindow(Adw.ApplicationWindow):
         card.set_tooltip_text("Bấm để mở chi tiết bên phải")
         return card
 
+    # ---------- VIEW GANTT + SƠ ĐỒ (gói Coogo v1.6.0) ----------
+    @staticmethod
+    def _rgb(hx):
+        hx = (hx or "#60A5FA").lstrip("#")
+        if len(hx) == 3: hx = "".join(ch * 2 for ch in hx)
+        try: return tuple(int(hx[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        except Exception: return (0.38, 0.65, 0.98)
+
+    @staticmethod
+    def _rr(cr, x, y, w, h, r):
+        import math
+        cr.new_path()
+        cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+        cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+        cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+        cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
+        cr.close_path()
+
+    @staticmethod
+    def _fit_text(cr, text, max_w):
+        text = text or ""
+        if cr.text_extents(text).width <= max_w: return text
+        while text and cr.text_extents(text + "…").width > max_w:
+            text = text[:-1]
+        return text + "…" if text else ""
+
+    # ----- Gantt: mỗi việc một thanh từ ngày bắt đầu tới hạn -----
+    def _render_gantt(self):
+        tasks = [t for t in self.all_tasks
+                 if self._passes(t)
+                 and (t.get("project_id") or self.cur_project) == self.cur_project
+                 and (t.get("due_date") or t.get("start_date"))]
+        tasks.sort(key=lambda t: (t.get("start_date") or t.get("due_date") or "9999",
+                                  t.get("due_date") or "9999"))
+        self._gantt_tasks = tasks
+        if not tasks:
+            self._gantt_range = None
+            self.gantt_area.set_size_request(640, 120)
+            self.gantt_area.queue_draw()
+            return
+        marks = []
+        for t in tasks:
+            marks += [t.get("start_date") or t.get("due_date"),
+                      t.get("due_date") or t.get("start_date")]
+        td = today_()
+        d0 = min(date.fromisoformat(min(marks)) - timedelta(days=3), td - timedelta(days=3))
+        d1 = max(date.fromisoformat(max(marks)) + timedelta(days=7), td + timedelta(days=10))
+        days = max(21, (d1 - d0).days)
+        px = 26
+        self._gantt_range = (d0, days, px)
+        self.gantt_area.set_size_request(216 + days * px + 16, 40 + len(tasks) * 32 + 14)
+        self.gantt_area.queue_draw()
+
+    def _gantt_draw(self, area, cr, w, h):
+        dark = SETTINGS["theme"] == "dark"
+        txt = (0.90, 0.93, 0.97) if dark else (0.09, 0.09, 0.09)
+        mut = (0.60, 0.64, 0.70) if dark else (0.42, 0.45, 0.51)
+        grid = (1, 1, 1, 0.07) if dark else (0, 0, 0, 0.08)
+        wknd = (1, 1, 1, 0.035) if dark else (0, 0, 0, 0.035)
+        red = (0.97, 0.44, 0.44) if dark else (0.86, 0.15, 0.15)
+        grn = (0.20, 0.83, 0.60) if dark else (0.02, 0.59, 0.41)
+        LABW, HDR, ROWH = 216, 40, 32
+        tasks = getattr(self, "_gantt_tasks", [])
+        rng = getattr(self, "_gantt_range", None)
+        cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
+        if not tasks or not rng:
+            cr.set_source_rgb(*mut); cr.set_font_size(13)
+            cr.move_to(16, 40)
+            cr.show_text("Chưa có việc nào có ngày bắt đầu / hạn để vẽ Gantt — đặt hạn cho việc là thanh sẽ hiện ở đây.")
+            return
+        d0, days, px = rng
+        td = today_()
+        colmap = {c["id"]: c for c in self.columns}
+        # Nền cuối tuần + lưới ngày + nhãn ngày
+        for i in range(days):
+            d = d0 + timedelta(days=i)
+            x = LABW + i * px
+            if d.weekday() >= 5:
+                cr.set_source_rgba(*wknd); cr.rectangle(x, 0, px, h); cr.fill()
+            cr.set_source_rgba(*grid); cr.set_line_width(1)
+            cr.move_to(x + 0.5, HDR - 14); cr.line_to(x + 0.5, h); cr.stroke()
+            if i % 7 == 0 or d.day == 1:
+                cr.set_source_rgb(*mut); cr.set_font_size(10.5)
+                cr.move_to(x + 3, HDR - 20); cr.show_text(d.strftime("%d/%m"))
+        # Đường "hôm nay"
+        tx = LABW + (td - d0).days * px
+        cr.set_source_rgb(*red); cr.set_line_width(1.6)
+        cr.move_to(tx + 0.5, HDR - 14); cr.line_to(tx + 0.5, h); cr.stroke()
+        cr.set_font_size(10.5); cr.move_to(tx + 4, HDR - 20); cr.show_text("hôm nay")
+        # Các thanh việc
+        for i, t in enumerate(tasks):
+            y = HDR + i * ROWH
+            s = date.fromisoformat(t.get("start_date") or t.get("due_date"))
+            e = date.fromisoformat(t.get("due_date") or t.get("start_date"))
+            if e < s: s, e = e, s
+            cr.set_source_rgb(*mut if t["status"] == "done" else txt)
+            cr.set_font_size(12)
+            cr.move_to(10, y + ROWH / 2 + 4)
+            cr.show_text(self._fit_text(cr, t["title"], LABW - 20))
+            bx = LABW + (s - d0).days * px
+            bw = max(px, ((e - s).days + 1) * px)
+            col = self._rgb((colmap.get(t.get("column_id")) or {}).get("color"))
+            if t["status"] == "done":
+                cr.set_source_rgba(*grn, 0.55)
+            else:
+                cr.set_source_rgba(*col, 0.85)
+            self._rr(cr, bx + 1, y + 6, bw - 2, ROWH - 12, 6); cr.fill()
+            if t["status"] != "done" and (t.get("due_date") or "") < td.isoformat():
+                cr.set_source_rgb(*red); cr.set_line_width(1.6)
+                self._rr(cr, bx + 1, y + 6, bw - 2, ROWH - 12, 6); cr.stroke()
+            if t.get("due_time"):
+                cr.set_source_rgb(*txt); cr.set_font_size(10.5)
+                cr.move_to(bx + bw + 5, y + ROWH / 2 + 4); cr.show_text(t["due_time"])
+
+    def _gantt_click(self, _g, x, y):
+        tasks = getattr(self, "_gantt_tasks", [])
+        i = int((y - 40) // 32)
+        if 0 <= i < len(tasks): self.open_task(tasks[i])
+
+    # ----- Sơ đồ: Dự án -> Cột -> Việc -> Việc con (mindmap trái sang phải) -----
+    def _render_mindmap(self):
+        proj = next((p for p in self.projects if p["id"] == self.cur_project), None)
+        cols = [c for c in self.columns if c.get("project_id") == self.cur_project] or list(self.columns)
+        first_id = cols[0]["id"] if cols else None
+        ROWH = 27
+        X = {"root": 14, "col": 216, "task": 452, "sub": 712}
+        W = {"root": 158, "col": 192, "task": 216, "sub": 236}
+        nodes, y = [], 16
+        for c in cols:
+            tasks = [t for t in self.all_tasks
+                     if t["status"] != "done" and self._passes(t)
+                     and (t.get("project_id") or self.cur_project) == self.cur_project
+                     and (t.get("column_id") or first_id) == c["id"]]
+            if not tasks: continue
+            y0, laid = y, []
+            for t in tasks:
+                subs = t.get("subtasks") or []
+                th = max(1, len(subs)) * ROWH
+                laid.append((t, y, th))
+                y += th
+            colnode = {"kind": "col", "x": X["col"], "y": (y0 + y - 26) / 2, "w": W["col"], "h": 26,
+                       "label": c["name"], "color": c.get("color") or "#60A5FA", "task": None}
+            nodes.append(colnode)
+            for t, ty, th in laid:
+                tn = {"kind": "task", "x": X["task"], "y": ty + (th - 24) / 2, "w": W["task"], "h": 24,
+                      "label": t["title"], "task": t, "parent": colnode}
+                nodes.append(tn)
+                for j, s in enumerate(t.get("subtasks") or []):
+                    nodes.append({"kind": "sub", "x": X["sub"], "y": ty + j * ROWH + 2, "w": W["sub"], "h": 22,
+                                  "label": s.get("t") or "", "done": bool(s.get("done")),
+                                  "task": t, "parent": tn})
+        total_h = max(y + 16, 170)
+        if proj and any(n["kind"] == "col" for n in nodes):
+            rn = {"kind": "root", "x": X["root"], "y": 16 + (total_h - 16 - 32) / 2, "w": W["root"], "h": 32,
+                  "label": proj["name"], "color": proj.get("color") or "#60A5FA", "task": None}
+            nodes.append(rn)
+            for n in nodes:
+                if n["kind"] == "col": n["parent"] = rn
+        self._map_nodes = nodes
+        self.map_area.set_size_request(X["sub"] + W["sub"] + 24, total_h)
+        self.map_area.queue_draw()
+
+    def _map_draw(self, area, cr, w, h):
+        dark = SETTINGS["theme"] == "dark"
+        txt = (0.90, 0.93, 0.97) if dark else (0.09, 0.09, 0.09)
+        mut = (0.60, 0.64, 0.70) if dark else (0.42, 0.45, 0.51)
+        cardbg = (0.15, 0.17, 0.21) if dark else (1, 1, 1)
+        cardbd = (0.23, 0.26, 0.32) if dark else (0.82, 0.85, 0.90)
+        accent = (0.30, 0.55, 1.0) if dark else (0.15, 0.39, 0.92)
+        nodes = getattr(self, "_map_nodes", [])
+        cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
+        if not nodes:
+            cr.set_source_rgb(*mut); cr.set_font_size(13)
+            cr.move_to(16, 40)
+            cr.show_text("Chưa có việc đang mở nào trong dự án này để vẽ sơ đồ.")
+            return
+        # Đường nối (vẽ trước, nằm dưới các hộp)
+        cr.set_line_width(1.6)
+        for n in nodes:
+            p = n.get("parent")
+            if not p: continue
+            x1, y1 = p["x"] + p["w"], p["y"] + p["h"] / 2
+            x2, y2 = n["x"], n["y"] + n["h"] / 2
+            cr.set_source_rgba(*self._rgb(p.get("color") or "#60A5FA"), 0.55)
+            cr.move_to(x1, y1)
+            cr.curve_to(x1 + 42, y1, x2 - 42, y2, x2, y2)
+            cr.stroke()
+        # Các hộp
+        for n in nodes:
+            x, y, nw, nh = n["x"], n["y"], n["w"], n["h"]
+            if n["kind"] in ("root", "col"):
+                cr.set_source_rgba(*self._rgb(n.get("color")), 0.92)
+                self._rr(cr, x, y, nw, nh, 8); cr.fill()
+                cr.set_source_rgb(1, 1, 1)
+                cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.BOLD)
+                cr.set_font_size(13 if n["kind"] == "root" else 12.5)
+            elif n["kind"] == "task":
+                cr.set_source_rgb(*cardbg); self._rr(cr, x, y, nw, nh, 7); cr.fill()
+                sel = n["task"] and getattr(self, "selected_id", None) == n["task"]["id"]
+                cr.set_source_rgb(*(accent if sel else cardbd))
+                cr.set_line_width(2 if sel else 1.2)
+                self._rr(cr, x, y, nw, nh, 7); cr.stroke()
+                cr.set_source_rgb(*txt); cr.set_font_size(12)
+            else:
+                cr.set_source_rgba(*cardbg, 0.55); self._rr(cr, x, y, nw, nh, 6); cr.fill()
+                cr.set_source_rgb(*cardbd); cr.set_line_width(1)
+                self._rr(cr, x, y, nw, nh, 6); cr.stroke()
+                cr.set_source_rgb(*(mut if n.get("done") else txt)); cr.set_font_size(11.5)
+            label = n["label"] or ""
+            fitted = self._fit_text(cr, label, nw - 18)
+            cr.move_to(x + 10, y + nh / 2 + 4.5)
+            cr.show_text(fitted)
+            if n["kind"] == "sub" and n.get("done"):
+                # Gạch ngang việc con đã xong (vẽ bằng nét cairo — không phụ
+                # thuộc glyph ✓, font hệ thống nào cũng hiện đúng)
+                tw = cr.text_extents(fitted).width
+                cr.set_line_width(1.2)
+                cr.move_to(x + 10, y + nh / 2)
+                cr.line_to(x + 10 + tw, y + nh / 2)
+                cr.stroke()
+            cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
+
+    def _map_click(self, _g, x, y):
+        for n in reversed(getattr(self, "_map_nodes", [])):
+            if n.get("task") and n["x"] <= x <= n["x"] + n["w"] and n["y"] <= y <= n["y"] + n["h"]:
+                self.open_task(n["task"]); return
+
     # ---------- VIEW DANH SÁCH (v1.5.0 — tab thứ hai sau Bảng) ----------
     def _list_row(self, t):
         row = Gtk.Box(spacing=8); row.add_css_class("lrow")
@@ -4357,6 +4922,76 @@ class MainWindow(Adw.ApplicationWindow):
         _fc = next((c["id"] for c in self.columns if c.get("project_id") == self.cur_project), None)
         r = self._safe(api, "POST", "/api/quick", {"text": text, "source": "desktop", "column_id": _fc})
         if r: self.quick.set_text(""); self.refresh()
+
+    # ---------- AI Gemini điền form (gói Coogo v1.6.0) ----------
+    def _quick_ai(self, *_):
+        text = self.quick.get_text().strip()
+        if not text:
+            self._toast("Gõ một câu mô tả việc trước — ví dụ: “Chiều mai 3h họp team, chuẩn bị slide, khá gấp”")
+            return
+        key = SETTINGS.get("gemini_key") or ""
+        if not key:
+            self._toast("Chưa có Gemini API key — dán key (miễn phí) trong ⚙ Cài đặt ở thanh bên trước đã")
+            SettingsDialog(self).present()
+            return
+        self.ai_btn.set_sensitive(False)
+        self.quick_preview.set_text("✨ AI đang đọc câu và điền form…")
+        self.quick_preview.set_visible(True)
+        threading.Thread(target=self._quick_ai_worker, args=(text, key), daemon=True).start()
+
+    def _quick_ai_worker(self, text, key):
+        td = today_()
+        VN = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+        prompt = (
+            f"Hôm nay là {VN[td.weekday()]} ngày {td.strftime('%d/%m/%Y')}. "
+            "Đọc câu mô tả công việc bằng tiếng Việt dưới đây và trả về DUY NHẤT một JSON "
+            "(không giải thích, không markdown) theo mẫu: "
+            '{"title": "tiêu đề ngắn gọn", "due_date": "YYYY-MM-DD hoặc null", '
+            '"due_time": "HH:MM hoặc null", "estimate_min": số phút hoặc null, '
+            '"important": true/false, "urgent": true/false, '
+            '"tags": ["nhãn"], "subtasks": ["việc con gợi ý, tối đa 5"]}. '
+            "Ngày tháng tương đối (mai, thứ 6 này, tuần sau…) phải quy ra ngày thật theo hôm nay. "
+            f"Câu mô tả: {text}")
+        payload = {"contents": [{"parts": [{"text": prompt}]}],
+                   "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}
+        try:
+            req = urllib.request.Request(
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"gemini-2.0-flash:generateContent?key={key}",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=25) as r:
+                out = json.loads(r.read().decode())
+            spec = json.loads(out["candidates"][0]["content"]["parts"][0]["text"])
+            GLib.idle_add(self._quick_ai_done, spec, None)
+        except Exception as e:
+            GLib.idle_add(self._quick_ai_done, None, str(e)[:140])
+
+    def _quick_ai_done(self, spec, err):
+        self.ai_btn.set_sensitive(True)
+        if err or not spec:
+            self.quick_preview.set_text(f"✨ AI chưa điền được ({err or 'phản hồi lạ'}) — Enter để thêm nhanh như thường.")
+            return False
+        body = {"title": (str(spec.get("title") or "").strip() or "Việc mới")}
+        fc = next((c for c in self.columns if c.get("project_id") == self.cur_project), None)
+        if fc: body["column_id"] = fc["id"]
+        for k in ("due_date", "due_time", "estimate_min", "remind_before"):
+            if spec.get(k): body[k] = spec[k]
+        if spec.get("important"): body["important"] = True
+        if spec.get("urgent"): body["urgent"] = True
+        if spec.get("tags"):
+            body["tags"] = [str(x).lstrip("#").strip() for x in spec["tags"] if str(x).strip()]
+        subs = [{"t": str(s), "done": False} for s in (spec.get("subtasks") or []) if str(s).strip()]
+        if subs: body["subtasks"] = subs
+        r = self._safe(api, "POST", "/api/tasks", body)
+        self.quick.set_text("")
+        self.quick_preview.set_visible(False)
+        self.refresh()
+        nt = (r or {}).get("task")
+        if nt:
+            self._toast("✨ AI đã điền form — kiểm lại trong popup, sai đâu sửa đó")
+            self.open_task(nt)
+        return False
 
 _THEME_PROVIDER = [None]
 def apply_theme():

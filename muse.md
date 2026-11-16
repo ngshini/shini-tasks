@@ -191,6 +191,26 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   bóp bảng quá hẹp. Phần còn lại của v1.5.0 giữ nguyên. Bài học: mẫu duyệt
   trên mockup ≠ cảm giác dùng thật — quyết định cuối luôn thuộc về trải
   nghiệm thực tế của chủ dự án.
+- **v1.6.0 (2026-11-16) — Gói Coogo.** Chủ dự án gửi link sản phẩm Coogo
+  Flow (app quản lý dự án cho team trên Google Apps Script) và chọn "đưa
+  tính năng còn thiếu vào Shini Tasks". Đã bổ sung, giữ nguyên định vị local
+  cá nhân: **view Sơ đồ** (mindmap Dự án → Cột → Việc → Việc con, vẽ Cairo),
+  **view Gantt** (thanh bắt đầu → hạn, đường hôm nay), **đánh giá & phê
+  duyệt** (`tasks.rating` 1–5 sao + `tasks.verdict` ''/approved/redo, chấm
+  trong popup, thống kê hiện điểm trung bình), **lưu trữ dự án**
+  (`projects.archived`, khôi phục ở mục 📦 Đã lưu trữ), **bình luận gắn
+  file/ảnh/video** (`attachments.comment_id`, ảnh xem trước trong popup),
+  **lọc theo người làm**, **thông báo Telegram** cho chính người dùng
+  (bot token + chat id cấu hình trong ⚙ Cài đặt, lưu ở bảng `meta` của
+  engine qua `/api/notify-config`; `notify()` được bọc để soi gương sang
+  Telegram, có khử trùng 5 giây), **AI Gemini điền form** (nút ✨ ở ô thêm
+  nhanh, key lưu trong settings của app, model gemini-2.0-flash, trả JSON).
+  KHÔNG làm: thông báo Zalo (Zalo không cho tự động hoá tài khoản cá nhân —
+  đừng hứa), tính năng team thật (giao việc cho tài khoản khác, chat nhiều
+  người) vì phá định vị không-tài-khoản. Bài học kỹ thuật: view vẽ bằng
+  Cairo (Gantt/Sơ đồ) thì `import cairo` phải ở cấp module; glyph ✓ không
+  có trong font mà Cairo toy API chọn — việc con đã xong trên Sơ đồ dùng nét
+  gạch ngang vẽ tay thay cho ký tự ✓.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 
