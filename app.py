@@ -82,6 +82,12 @@ def load_settings():
     try:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             d = json.load(f)
+        # Giữ MỌI khóa đã lưu (peer_url, peer_token, gemini_key,
+        # display_name, welcomed...) — bản cũ chỉ nạp 4 khóa cố định nên
+        # các cài đặt kia MẤT khỏi bộ nhớ sau mỗi lần mở lại app (lỗi
+        # tiềm ẩn phát hiện ở gói B audit 2026-11-17).
+        for k, v in d.items():
+            if k != "labels": s[k] = v
         s["labels"].update(d.get("labels") or {})
         if d.get("theme") in ("dark", "light"): s["theme"] = d["theme"]
         if isinstance(d.get("sections"), dict): s["sections"] = d["sections"]
@@ -1388,8 +1394,7 @@ class DetailPane:
         dup.connect("clicked", lambda *_: (pop.popdown(), win._duplicate(self.task)))
         pbox.append(dup)
         tom = Gtk.Button(label="🌅 Dời sang mai"); tom.add_css_class("flat"); tom.add_css_class("dlgflat")
-        tom.connect("clicked", lambda *_: (pop.popdown(),
-                      self._patch({"due_date": (today_() + timedelta(days=1)).isoformat()}, rebuild=True)))
+        tom.connect("clicked", lambda *_: (pop.popdown(), self._postpone_tomorrow()))
         pbox.append(tom)
         if (t.get("repeat_rule") or "none") != "none":
             sk = Gtk.Button(label="⏭ Bỏ qua kỳ này"); sk.add_css_class("flat"); sk.add_css_class("dlgflat")
@@ -1619,6 +1624,16 @@ class DetailPane:
         if nt: self.task = nt; self._build()
         else: self.win.close_pane()
 
+    def _postpone_tomorrow(self):
+        """Dời hạn sang mai — kèm toast Hoàn tác (gói B audit 2026-11-17)."""
+        if not self.task: return
+        tid, old = self.task["id"], self.task.get("due_date")
+        self._patch({"due_date": (today_() + timedelta(days=1)).isoformat()}, rebuild=True)
+        def undo():
+            self.win._safe(api, "PATCH", f"/api/tasks/{tid}", {"due_date": old})
+            self.win.refresh(); self.win._pane_resync(tid)
+        self.win._toast("🌅 Đã dời việc sang mai", undo_fn=undo)
+
     def _skip_once(self):
         try: api("POST", f"/api/tasks/{self.task['id']}/skip")
         except Exception as e:
@@ -1640,6 +1655,11 @@ class DetailPane:
         tid = self.task["id"]
         if val == "done":
             self.win._safe(api, "POST", f"/api/tasks/{tid}/done")
+            title = self.task["title"]
+            def undo():
+                self.win._safe(api, "POST", f"/api/tasks/{tid}/reopen")
+                self.win.refresh(); self.win._pane_resync(tid)
+            self.win._toast(f"✓ Đã xong: {title}", undo_fn=undo)
         elif cur == "done":
             self.win._safe(api, "POST", f"/api/tasks/{tid}/reopen")
             if val == "doing": self._patch({"status": "doing"})
@@ -2180,6 +2200,64 @@ class ArchivedProjectsDialog(Gtk.Window):
         self._reload()
 
 
+class WelcomeDialog(Gtk.Window):
+    """Hướng dẫn nhanh (gói B audit 2026-11-17): tự hiện ở lần mở đầu
+    tiên, mở lại ở chân thanh bên → ❓ Hướng dẫn sử dụng. Mục tiêu: người
+    mới tự khám phá được các 'phép thuật' vốn ẩn của app (Alt+E, cú pháp
+    gõ tắt, thông báo có nút bấm...) mà không cần ai chỉ."""
+
+    SECTIONS = [
+        ("⚡ BẮT VIỆC SIÊU NHANH",
+         "• Bấm Alt+E ở BẤT KỲ đâu trên máy (hoặc nút ⚡ trên thanh tiêu đề): cửa sổ bắt việc hiện lên, "
+         "gõ xong Enter là lưu, Esc là đóng. Dán nhiều dòng = mỗi dòng một việc.\n"
+         "• Ô 'Thêm nhanh' trên bảng hiểu cú pháp gõ tắt, ví dụ:  mai 9h họp team !gấp #work 30p mỗi T2 T4\n"
+         "   (! = mức ưu tiên, # = nhãn, 30p = ước lượng, 'mỗi…' = lặp lại, 'lặp 12 lần' = tổng số lần)\n"
+         "• Có API key Gemini (ở ⚙ Cài đặt) thì bấm ✨ AI: gõ một câu tự nhiên, AI tự điền mọi trường."),
+        ("🗂 LÀM VIỆC HẰNG NGÀY",
+         "• Bấm vào thẻ để mở chi tiết: mọi thay đổi tự lưu ngay; có việc con, bình luận, file đính kèm, bấm giờ thật.\n"
+         "• Kéo thẻ sang cột khác, thả vào cột ĐÃ XONG để hoàn thành; kéo lên Lịch để xếp giờ. "
+         "Mọi thao tác lỡ tay đều có nút Hoàn tác ở thông báo nhỏ góc dưới.\n"
+         "• 6 màn hình: Bảng · Danh sách · Lịch (Ngày/Tuần/Tháng) · Hôm nay · Sơ đồ · Thống kê. "
+         "Ctrl+N việc mới · Ctrl+F/Ctrl+K tìm · Ctrl+B ẩn thanh bên."),
+        ("🔔 NHẮC VIỆC",
+         "• Đến gần hạn, thông báo trên máy hiện KÈM NÚT BẤM: hoãn nhắc, dời sang mai, đánh dấu xong — "
+         "xử lý luôn khỏi mở app.\n"
+         "• Muốn nhắc về điện thoại: nối Telegram trong ⚙ Cài đặt (tạo bot qua @BotFather, mất ~2 phút). "
+         "Bản tin tổng hợp tự gửi lúc 07:30 và 20:30 mỗi ngày."),
+        ("📱 TỪ ĐIỆN THOẠI & MÁY KHÁC",
+         "• iPhone: tạo Shortcut theo file HUONG-DAN-DIEN-THOAI.md (trong thư mục app) để ghi việc từ xa qua Tailscale.\n"
+         "• Hai máy tính chạy Shini Tasks đồng bộ hai chiều được: mở ⇄ Đồng bộ ở chân thanh bên, "
+         "dán địa chỉ + token của máy kia."),
+        ("🛡 DỮ LIỆU CỦA BẠN",
+         "• Mọi thứ nằm trên máy của bạn, không tài khoản, không đám mây. Engine tự sao lưu mỗi ngày "
+         "(giữ 14 bản), việc xoá vào thùng rác 30 ngày, việc xong quá 15 ngày được lưu trữ cho thống kê.\n"
+         "• API có token bảo vệ: máy lạ cùng mạng không đọc/sửa được dữ liệu (token ở ⚙ Cài đặt)."),
+    ]
+
+    def __init__(self, parent):
+        super().__init__(title="Hướng dẫn sử dụng — Shini Tasks", transient_for=parent, modal=True)
+        self.set_default_size(560, 640)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(18); box.set_margin_end(18)
+        box.append(Gtk.Label(label="Chào mừng bạn đến với Shini Tasks 👋", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="App quản lý việc cá nhân chạy ngay trên máy của bạn. "
+                                   "Năm ý dưới đây là mọi thứ cần biết để dùng thạo:",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        for head, body in self.SECTIONS:
+            box.append(Gtk.Label(label=head, xalign=0, css_classes=["pane-h"]))
+            box.append(Gtk.Label(label=body, xalign=0, wrap=True, css_classes=["mut"]))
+        scroll.set_child(box)
+        outer.append(scroll)
+        ok = Gtk.Button(label="Đã hiểu, bắt đầu thôi"); ok.add_css_class("suggested-action")
+        ok.set_margin_top(10); ok.set_margin_bottom(12); ok.set_margin_start(18); ok.set_margin_end(18)
+        ok.connect("clicked", lambda *_: self.close())
+        outer.append(ok)
+        self.set_child(outer)
+
+
 class SettingsDialog(Gtk.Window):
     """Cài đặt (gói Coogo v1.6.0): thông báo Telegram về điện thoại của chính
     người dùng + API key Gemini cho nút ✨ AI điền form. Token/key chỉ lưu
@@ -2192,6 +2270,26 @@ class SettingsDialog(Gtk.Window):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_margin_top(16); box.set_margin_bottom(16)
         box.set_margin_start(16); box.set_margin_end(16)
+        box.append(Gtk.Label(label="NHẮC VIỆC", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Nhắc trước hạn áp dụng cho việc MỚI tạo (việc cũ giữ nguyên số đã đặt "
+                                   "trong chi tiết). Hoãn nhắc là thời gian im lặng khi bấm nút "
+                                   "'Nhắc lại sau' trên thông báo.",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        rrow = Gtk.Box(spacing=8)
+        rrow.append(Gtk.Label(label="Nhắc trước (phút):", css_classes=["mut"]))
+        self.sp_remind = Gtk.SpinButton.new_with_range(0, 1440, 5)
+        self.sp_remind.set_value(30)
+        rrow.append(self.sp_remind)
+        rrow.append(Gtk.Label(label="Hoãn nhắc (phút):", css_classes=["mut"]))
+        self.sp_snooze = Gtk.SpinButton.new_with_range(1, 240, 1)
+        self.sp_snooze.set_value(15)
+        rrow.append(self.sp_snooze)
+        brem = Gtk.Button(label="Lưu"); brem.add_css_class("dlgbtn")
+        brem.connect("clicked", self._save_remind)
+        rrow.append(brem)
+        self.rem_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
+        rrow.append(self.rem_result)
+        box.append(rrow)
         box.append(Gtk.Label(label="TELEGRAM — NHẮC VIỆC VỀ ĐIỆN THOẠI", xalign=0, css_classes=["pane-h"]))
         box.append(Gtk.Label(label="Cách nối: mở Telegram → tìm @BotFather → /newbot để tạo bot, "
                                    "copy token dán vào đây. Nhắn cho bot 1 tin bất kỳ, rồi mở "
@@ -2248,8 +2346,28 @@ class SettingsDialog(Gtk.Window):
         self.tok_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
         krow.append(self.tok_result)
         box.append(krow)
+        box.append(Gtk.Label(label="QUẢN LÝ & DỮ LIỆU — MỞ NHANH", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Các công cụ này cũng nằm ở chân thanh bên — gom thêm tại đây "
+                                   "để mọi cài đặt ở một chỗ.",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        hrow = Gtk.Box(spacing=8)
+        for _label, _cls in [("🗑 Thùng rác", TrashDialog), ("🏷 Quản lý nhãn", TagsDialog),
+                             ("✎ Tên mức ưu tiên", LabelsDialog), ("⇄ Đồng bộ · Sao lưu", SyncDialog)]:
+            _b = Gtk.Button(label=_label); _b.add_css_class("dlgbtn")
+            _b.connect("clicked", lambda *_ , c=_cls: c(self.win, self.win.refresh).present())
+            hrow.append(_b)
+        box.append(hrow)
         self.set_child(box)
         self._load_tg()
+
+    def _save_remind(self, *_):
+        try:
+            api("POST", "/api/notify-config",
+                {"remind_default": int(self.sp_remind.get_value()),
+                 "snooze_min": int(self.sp_snooze.get_value())})
+            self.rem_result.set_text("Đã lưu ✓")
+        except Exception:
+            self.rem_result.set_text("Lưu không được — engine chưa chạy?")
 
     def _copy_token(self, *_):
         tok = _read_api_token()
@@ -2264,6 +2382,10 @@ class SettingsDialog(Gtk.Window):
     def _load_tg(self):
         try: cfg = api("GET", "/api/notify-config")
         except Exception: cfg = {}
+        try:
+            self.sp_remind.set_value(cfg.get("remind_default", 30))
+            self.sp_snooze.set_value(cfg.get("snooze_min", 15))
+        except Exception: pass
         self.e_tg_chat.set_text(cfg.get("telegram_chat") or "")
         if cfg.get("telegram_token_set"):
             self.tg_status.set_text(f"Đã nối Telegram (token ••••{cfg.get('telegram_token_tail', '')}). "
@@ -3374,6 +3496,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_controller(keyctl)
         self.refresh()
         GLib.timeout_add_seconds(5, self._tick)
+        # Lần mở ĐẦU TIÊN: hiện hộp Hướng dẫn (gói B audit 2026-11-17);
+        # mở lại bất cứ lúc nào ở chân thanh bên → ❓ Hướng dẫn sử dụng.
+        if not SETTINGS.get("welcomed") or os.environ.get("SHINI_TASKS_WELCOME"):
+            GLib.timeout_add(800, self._show_welcome)
+
+    def _show_welcome(self):
+        SETTINGS["welcomed"] = True; save_settings(SETTINGS)
+        WelcomeDialog(self).present()
+        return False
 
     # ---------- Theme ----------
     def _theme_btn_label(self):
@@ -3567,12 +3698,19 @@ class MainWindow(Adw.ApplicationWindow):
         addb.set_tooltip_text("Tạo việc mới và mở panel chi tiết để điền (Ctrl+N)")
         addb.connect("clicked", lambda *_: self.new_task())
         sb.append(addb)
-        self.search = Gtk.SearchEntry(placeholder_text="Tìm kiếm…")
+        srow = Gtk.Box(spacing=6)
+        self.search = Gtk.SearchEntry(placeholder_text="Tìm… Enter = tìm mọi nơi")
         self.search.add_css_class("sb2search")
+        self.search.set_hexpand(True)
         self.search.set_tooltip_text("Gõ để lọc bảng · Enter để TÌM MỌI NƠI (mọi dự án, việc đã xong, cả trong bình luận)")
         self.search.connect("search-changed", self._on_search)
         self.search.connect("activate", self._on_search_enter)
-        sb.append(self.search)
+        srow.append(self.search)
+        sbtn = Gtk.Button(label="🔍"); sbtn.add_css_class("flat")
+        sbtn.set_tooltip_text("Tìm MỌI NƠI: mọi dự án, việc đã xong, cả trong bình luận")
+        sbtn.connect("clicked", lambda *_: SearchDialog(self, self.search.get_text().strip()).present())
+        srow.append(sbtn)
+        sb.append(srow)
         self.smart_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.smart_box.set_margin_top(8)
         sb.append(self.smart_box)
@@ -3612,6 +3750,8 @@ class MainWindow(Adw.ApplicationWindow):
              lambda *_: LabelsDialog(self, self.refresh).present()),
             ("⇄  Đồng bộ · Sao lưu", "Đồng bộ với máy kia qua Tailscale, xuất/nhập JSON, khôi phục sao lưu (engine cũng tự sao lưu mỗi ngày)",
              lambda *_: SyncDialog(self, self.refresh).present()),
+            ("❓  Hướng dẫn sử dụng", "Bắt việc siêu nhanh, cú pháp gõ tắt, các màn hình, nhắc việc và an toàn dữ liệu",
+             lambda *_: WelcomeDialog(self).present()),
             ("⚙  Cài đặt · Telegram & AI", "Nối Telegram để nhắc việc về điện thoại + API key Gemini cho nút ✨ AI điền form",
              lambda *_: SettingsDialog(self).present()),
         ]:
@@ -4627,9 +4767,12 @@ class MainWindow(Adw.ApplicationWindow):
         t = self._find_task(tid) if tid is not None else None
         if not t: return False
         if t.get("column_id") != col["id"]:
+            old_col = t.get("column_id")
             self._safe(api, "PATCH", f"/api/tasks/{tid}", {"column_id": col["id"]})
             self.refresh()
-            self._toast(f"⇄ Đã chuyển “{t['title']}” sang cột {col['name']}")
+            self._toast(f"⇄ Đã chuyển “{t['title']}” sang cột {col['name']}",
+                        undo_fn=lambda: (self._safe(api, "PATCH", f"/api/tasks/{tid}",
+                                                    {"column_id": old_col}), self.refresh()))
         return True
 
     def _on_done_drop(self, val):
@@ -4639,7 +4782,8 @@ class MainWindow(Adw.ApplicationWindow):
         if not t or t["status"] == "done": return False
         self._safe(api, "POST", f"/api/tasks/{tid}/done")
         self.refresh()
-        self._toast(f"✓ Đã xong: {t['title']}")
+        self._toast(f"✓ Đã xong: {t['title']}",
+                    undo_fn=lambda: (self._safe(api, "POST", f"/api/tasks/{tid}/reopen"), self.refresh()))
         return True
 
     def _on_slot_drop(self, val, iso, hm, slotmin):
@@ -5139,8 +5283,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._toast(f"⧉ Đã nhân đôi việc “{t['title']}”")
         self.refresh()
     def _delete(self, t):
-        self._safe(api, "DELETE", f"/api/tasks/{t['id']}")
+        tid, title = t["id"], t["title"]
+        self._safe(api, "DELETE", f"/api/tasks/{tid}")
         self.refresh()
+        self._toast(f"🗑 Đã xoá “{title}” (vào thùng rác)",
+                    undo_fn=lambda: (self._safe(api, "POST", f"/api/tasks/{tid}/restore"), self.refresh()))
+
+    def _pane_resync(self, tid):
+        """Popup chi tiết đang mở đúng việc tid thì nạp lại nội dung —
+        dùng sau các nút Hoàn tác để popup không hiển thị dữ kiện cũ."""
+        pane = getattr(self, "pane", None)
+        if pane is not None and getattr(pane, "task", None) and pane.task.get("id") == tid:
+            nt = self._find_task(tid)
+            if nt: pane.task = nt; pane._build()
     def _col_add(self, col, entry):
         title = entry.get_text().strip()
         if not title: return

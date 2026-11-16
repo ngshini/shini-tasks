@@ -339,3 +339,27 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   Test `test_fix_a.py` 12/12 trên bản sao (không commit). Kiểm chứng
   live: không token → 403, có token → 200, app nạp đủ dữ liệu thật.
   Chưa release — chờ lệnh của Sinh (quy tắc phát hành 2026-11-17).
+- 2026-11-17 (gói B theo audit — trải nghiệm người dùng): (1) **Hướng
+  dẫn lần đầu**: WelcomeDialog 5 mục (bắt việc nhanh/cú pháp gõ tắt,
+  làm việc hằng ngày, nhắc, điện thoại & máy khác, an toàn dữ liệu) tự
+  hiện ở lần mở đầu (cờ `welcomed` trong settings), mở lại ở chân thanh
+  bên → ❓ Hướng dẫn sử dụng. (2) **Hoàn tác**: toast vốn đã có nút
+  Hoàn tác ở _toggle; nay nối thêm cho thả thẻ vào cột ĐÃ XONG, kéo
+  chuyển cột, xoá việc (khôi phục từ thùng rác), đổi trạng thái sang
+  Đã xong trong popup, và 🌅 Dời sang mai (PATCH lại hạn cũ); thêm
+  `MainWindow._pane_resync(tid)` để popup đang mở nạp lại sau hoàn tác.
+  (3) **Cài đặt gom một chỗ**: SettingsDialog thêm mục QUẢN LÝ & DỮ
+  LIỆU mở nhanh Thùng rác/Nhãn/Mức ưu tiên/Đồng bộ. (4) **Tìm kiếm dễ
+  thấy**: placeholder "Tìm… Enter = tìm mọi nơi" + nút 🔍 cạnh ô tìm mở
+  thẳng Tìm Mọi Nơi. (5) **Nhắc tuỳ biến**: meta `cfg_remind_default`
+  (0–1440) + `cfg_snooze_min` (1–240) qua /api/notify-config; insert
+  dùng mặc định khi việc không ghi rõ; **parse_quick đổi remind khởi
+  tạo 30 → None** để mặc định cấu hình có hiệu lực cả đường thêm
+  nhanh; nhãn + thời lượng snooze trên thông báo đọc từ cấu hình.
+  SettingsDialog có mục NHẮC VIỆC (2 SpinButton). (6) **Bắt được lỗi
+  tiềm ẩn thật**: `load_settings()` chỉ nạp 4 khóa cố định — peer_url,
+  peer_token, gemini_key, display_name... bị rơi khỏi bộ nhớ sau mỗi
+  lần mở app và sẽ bị ghi đè mất hẳn ở lần lưu cài đặt kế tiếp; đã sửa
+  thành nạp mọi khóa đã lưu. Test: test_fix_b.py 6/6 trên bản sao;
+  render kiểm chứng WelcomeDialog + SettingsDialog (tối) và thanh bên
+  (sáng). Chưa release — chờ lệnh của Sinh.

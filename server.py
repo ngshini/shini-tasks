@@ -334,7 +334,7 @@ def parse_quick(text):
     today = date.today()
     due_d, due_t = None, None
     important = urgent = False
-    tags, estimate, remind = [], None, 30
+    tags, estimate, remind = [], None, None   # remind=None = câu không nói -> insert_task dùng mặc định cấu hình
     t = raw
     # thẻ #tag — riêng thẻ ưu tiên kiểu KimesFlow (#urgent, #important, #high...)
     # thì thành CỜ ưu tiên chứ không thành nhãn
@@ -478,7 +478,8 @@ def insert_task(d, source="web"):
             (d.get("title","").strip(), d.get("notes",""), d.get("due_date"), d.get("due_time"),
              1 if d.get("important") else 0, 1 if d.get("urgent") else 0,
              ",".join(d.get("tags") or []), d.get("estimate_min"),
-             d.get("remind_before", 30), d.get("repeat_rule","none"), source, now, col, subs, now,
+             d.get("remind_before") if d.get("remind_before") is not None else _remind_default(),
+             d.get("repeat_rule","none"), source, now, col, subs, now,
              d.get("repeat_left"), pid, d.get("start_date"), d.get("assignee")))
         rid = cur.lastrowid
     with db() as c:
@@ -526,7 +527,7 @@ def notify_task_actions(title, body, task_id, urgency="normal"):
         env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
         try:
             p = subprocess.run(["notify-send", "-a", "Shini Tasks", "-u", urgency,
-                                "--action", "snooze=⏰ Nhắc lại sau 15 phút",
+                                "--action", f"snooze=⏰ Nhắc lại sau {_snooze_min()} phút",
                                 "--action", "tomorrow=🌅 Dời sang mai",
                                 "--action", "done=✓ Đã xong việc này",
                                 title, body], env=env, capture_output=True, text=True, timeout=900)
@@ -543,7 +544,7 @@ def notify_task_actions(title, body, task_id, urgency="normal"):
                 _api_self("PATCH", f"/api/tasks/{task_id}",
                           {"due_date": (base + timedelta(days=1)).isoformat()})
         elif act == "snooze":
-            until = (datetime.now() + timedelta(minutes=15)).isoformat(timespec="seconds")
+            until = (datetime.now() + timedelta(minutes=_snooze_min())).isoformat(timespec="seconds")
             with db() as c:
                 c.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                           (f"snooze_{task_id}", until))
@@ -627,6 +628,18 @@ def evening_preview(now):
             notify(f"🌙 Tối nay nhìn trước — mai có {len(rows)} việc", "\n".join(parts))
         c.execute("INSERT INTO meta(k,v) VALUES(?, '1')", (key,))
     return True
+
+def _remind_default():
+    """Số phút nhắc trước hạn MẶC ĐỊNH cho việc mới (cấu hình ở Cài đặt,
+    gói B audit 2026-11-17) — meta cfg_remind_default, kẹp 0..1440."""
+    try: return max(0, min(1440, int(_meta_get("cfg_remind_default") or 30)))
+    except Exception: return 30
+
+def _snooze_min():
+    """Số phút hoãn khi bấm 'Nhắc lại sau' trên thông báo — meta
+    cfg_snooze_min, kẹp 1..240, mặc định 15 như trước."""
+    try: return max(1, min(240, int(_meta_get("cfg_snooze_min") or 15)))
+    except Exception: return 15
 
 def _meta_get(k):
     with db() as c:
@@ -959,7 +972,9 @@ class H(BaseHTTPRequestHandler):
             tok = _meta_get("tg_token") or ""
             return self._json({"telegram_chat": _meta_get("tg_chat") or "",
                                "telegram_token_set": bool(tok),
-                               "telegram_token_tail": tok[-4:] if tok else ""})
+                               "telegram_token_tail": tok[-4:] if tok else "",
+                               "remind_default": _remind_default(),
+                               "snooze_min": _snooze_min()})
         if u.path == "/api/projects":
             with db() as c:
                 prs = [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY position, id").fetchall()]
@@ -1206,10 +1221,18 @@ class H(BaseHTTPRequestHandler):
             d = self._body()
             if "telegram_token" in d: _meta_set("tg_token", (d.get("telegram_token") or "").strip())
             if "telegram_chat" in d: _meta_set("tg_chat", (d.get("telegram_chat") or "").strip())
+            if "remind_default" in d:
+                try: _meta_set("cfg_remind_default", str(max(0, min(1440, int(d.get("remind_default"))))))
+                except Exception: pass
+            if "snooze_min" in d:
+                try: _meta_set("cfg_snooze_min", str(max(1, min(240, int(d.get("snooze_min"))))))
+                except Exception: pass
             tok = _meta_get("tg_token") or ""
             return self._json({"telegram_chat": _meta_get("tg_chat") or "",
                                "telegram_token_set": bool(tok),
-                               "telegram_token_tail": tok[-4:] if tok else ""})
+                               "telegram_token_tail": tok[-4:] if tok else "",
+                               "remind_default": _remind_default(),
+                               "snooze_min": _snooze_min()})
         if u.path == "/api/notify-test":
             ok, err = telegram_send("🔔 Shini Tasks — tin nhắn thử. Kênh Telegram đã nối xong, "
                                     "nhắc việc và bản tin sẽ về đây.")

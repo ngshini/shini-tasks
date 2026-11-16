@@ -380,6 +380,12 @@ sống lại.
   khoản; tính năng phụ thuộc mạng MUST suy giảm êm và báo rõ.
 - **FR-024**: Mọi bề mặt và chữ trong giao diện MUST đọc rõ ở cả theme
   sáng và tối theo Nguyên tắc III của constitution.
+- **FR-026**: Người dùng mới MUST được chào bằng hộp hướng dẫn ngắn ở
+  lần mở đầu tiên (bắt việc nhanh, cú pháp gõ tắt, các màn hình, nhắc
+  việc, an toàn dữ liệu) và mở lại được bất cứ lúc nào từ thanh bên.
+  Các thao tác dễ lỡ tay (đánh dấu xong, xoá, dời mai, chuyển cột)
+  MUST kèm thông báo có nút Hoàn tác. Số phút nhắc mặc định và số phút
+  hoãn nhắc MUST chỉnh được trong Cài đặt.
 - **FR-025**: Mọi yêu cầu API (đọc và ghi) MUST kèm token hợp lệ (header
   X-Token; riêng feed ICS chấp nhận tham số ?token= vì app lịch không
   gửi được header). Token lấy từ biến môi trường hoặc file
