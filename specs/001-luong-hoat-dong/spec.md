@@ -380,6 +380,18 @@ sống lại.
   khoản; tính năng phụ thuộc mạng MUST suy giảm êm và báo rõ.
 - **FR-024**: Mọi bề mặt và chữ trong giao diện MUST đọc rõ ở cả theme
   sáng và tối theo Nguyên tắc III của constitution.
+- **FR-027**: Sơ đồ MUST cho thu gọn/mở từng nhánh cột (và toàn bộ qua
+  nút gốc), tuỳ chọn hiện việc đã xong (mờ + gạch ngang), việc con quá
+  5 dòng MUST gộp thành dòng "+N nữa". Lịch chế độ Tháng MUST ghi số
+  ngày của mọi ngày và hiện tiêu đề trên các thanh đủ rộng. Mọi nút
+  trong các hộp thoại MUST mang class giao diện của app (không để theme
+  hệ thống lọt vào); điều hướng bằng bàn phím MUST có viền focus thấy
+  được ở cả hai theme.
+- **FR-028**: Bản đóng gói Linux (.deb) MUST chạy được khi thư mục code
+  chỉ đọc: dữ liệu đi qua biến môi trường SHINI_TASKS_DATA. Người dùng
+  MUST đồng bộ được qua một thư mục chung (xuất/nhập file JSON) bên
+  cạnh kênh địa chỉ máy. Trang Thống kê MUST có nút nhờ AI (key Gemini
+  của chính người dùng) nhận xét tuần từ số liệu thật.
 - **FR-026**: Người dùng mới MUST được chào bằng hộp hướng dẫn ngắn ở
   lần mở đầu tiên (bắt việc nhanh, cú pháp gõ tắt, các màn hình, nhắc
   việc, an toàn dữ liệu) và mở lại được bất cứ lúc nào từ thanh bên.

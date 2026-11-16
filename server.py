@@ -23,8 +23,14 @@ FROZEN = getattr(sys, "frozen", False)
 
 def _data_dir():
     """Nơi GHI ĐƯỢC dữ liệu (tasks.db, inbox.txt, backups/).
-    Windows đóng exe cài vào Program Files (chỉ đọc) -> dữ liệu phải nằm ở
+    Ưu tiên biến môi trường SHINI_TASKS_DATA (bản đóng gói .deb dùng nó vì
+    code nằm ở /usr/share chỉ đọc — gói D audit 2026-11-17). Windows đóng
+    exe cài vào Program Files (chỉ đọc) -> dữ liệu phải nằm ở
     %APPDATA%\\Shini Tasks. Các trường hợp còn lại giữ nguyên cạnh file code."""
+    env_d = os.environ.get("SHINI_TASKS_DATA", "").strip()
+    if env_d:
+        os.makedirs(env_d, exist_ok=True)
+        return env_d
     if IS_WIN and FROZEN:
         d = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Shini Tasks")
         os.makedirs(d, exist_ok=True)

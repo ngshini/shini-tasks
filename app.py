@@ -63,7 +63,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
 IS_WIN = sys.platform.startswith("win")
 FROZEN = getattr(sys, "frozen", False)
-if IS_WIN and FROZEN:
+_ENV_DATA = os.environ.get("SHINI_TASKS_DATA", "").strip()
+if _ENV_DATA:
+    # Bản đóng gói (.deb): code ở /usr/share chỉ đọc — settings theo
+    # SHINI_TASKS_DATA, CHUNG thư mục với engine (gói D audit 2026-11-17).
+    os.makedirs(_ENV_DATA, exist_ok=True)
+    SETTINGS_PATH = os.path.join(_ENV_DATA, "settings.json")
+elif IS_WIN and FROZEN:
     # Thư mục cài đặt (Program Files) chỉ đọc -> settings nằm ở %APPDATA%,
     # CHUNG thư mục dữ liệu với engine (server.py _data_dir) để đồng bộ 2 máy
     # qua thư mục đó sau này nếu cần.
@@ -111,7 +117,7 @@ def _read_api_token():
     dữ liệu chung với engine (server.py tự sinh file này)."""
     env_tok = os.environ.get("SHINI_TASKS_TOKEN", "").strip()
     if env_tok: return env_tok
-    d = _DATA_DIR if (IS_WIN and FROZEN) else BASE_DIR
+    d = _ENV_DATA or (_DATA_DIR if (IS_WIN and FROZEN) else BASE_DIR)
     try:
         return open(os.path.join(d, "api-token.txt"), encoding="utf-8").read().strip()
     except Exception:
@@ -590,6 +596,10 @@ textview.panenotes text { background: #262B36; color: #EDEDED; }
 .lhead { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: #C8C8C8; margin-top: 12px; }
 .subtask { color: #D6D6D6; font-size: 13px; }
 .subtask-done { color: #9A9A9A; font-size: 13px; }
+/* Viền focus khi điều hướng bằng BÀN PHÍM (gói C audit 2026-11-17) */
+button:focus-visible, entry:focus-visible, searchentry:focus-visible,
+dropdown:focus-visible, spinbutton:focus-visible, textview:focus-visible {
+  outline-color: #4C8DFF; outline-style: solid; outline-width: 2px; outline-offset: 1px; }
 """
 
 LIGHT_CSS = """
@@ -829,6 +839,10 @@ textview.panenotes text { background: #FFFFFF; color: #171717; }
 .lhead { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: #3D4756; margin-top: 12px; }
 .subtask { color: #333333; font-size: 13px; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
+/* Viền focus khi điều hướng bằng BÀN PHÍM (gói C audit 2026-11-17) */
+button:focus-visible, entry:focus-visible, searchentry:focus-visible,
+dropdown:focus-visible, spinbutton:focus-visible, textview:focus-visible {
+  outline-color: #2563EB; outline-style: solid; outline-width: 2px; outline-offset: 1px; }
 """
 
 def api(method, path, body=None, _retry=True):
@@ -2448,7 +2462,7 @@ class ColumnDialog(Gtk.Window):
             prow.append(b)
         box.append(prow)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Hủy"); cancel.connect("clicked", lambda *_: self.close())
+        cancel = Gtk.Button(label="Hủy"); cancel.add_css_class("dlgbtn"); cancel.connect("clicked", lambda *_: self.close())
         save = Gtk.Button(label="Lưu cột"); save.add_css_class("suggested-action")
         save.connect("clicked", self._save)
         brow.append(cancel); brow.append(save)
@@ -2481,7 +2495,7 @@ class ConfirmDialog(Gtk.Window):
         l = Gtk.Label(label=body, xalign=0, wrap=True)
         box.append(l)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Hủy"); cancel.connect("clicked", lambda *_: self.close())
+        cancel = Gtk.Button(label="Hủy"); cancel.add_css_class("dlgbtn"); cancel.connect("clicked", lambda *_: self.close())
         ok = Gtk.Button(label=ok_label); ok.add_css_class("destructive-action")
         ok.connect("clicked", self._ok)
         brow.append(cancel); brow.append(ok)
@@ -2522,7 +2536,7 @@ class ProjectDialog(Gtk.Window):
             prow.append(b)
         box.append(prow)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        cancel = Gtk.Button(label="Hủy"); cancel.connect("clicked", lambda *_: self.close())
+        cancel = Gtk.Button(label="Hủy"); cancel.add_css_class("dlgbtn"); cancel.connect("clicked", lambda *_: self.close())
         save = Gtk.Button(label="Lưu dự án"); save.add_css_class("suggested-action")
         save.connect("clicked", self._save)
         brow.append(cancel); brow.append(save)
@@ -2578,9 +2592,9 @@ class LabelsDialog(Gtk.Window):
             row.append(f)
             box.append(row)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        reset = Gtk.Button(label="Về mặc định")
+        reset = Gtk.Button(label="Về mặc định"); reset.add_css_class("dlgbtn")
         reset.connect("clicked", self._reset)
-        cancel = Gtk.Button(label="Hủy"); cancel.connect("clicked", lambda *_: self.close())
+        cancel = Gtk.Button(label="Hủy"); cancel.add_css_class("dlgbtn"); cancel.connect("clicked", lambda *_: self.close())
         save = Gtk.Button(label="Lưu tên"); save.add_css_class("suggested-action")
         save.connect("clicked", self._save)
         brow.append(reset); brow.append(cancel); brow.append(save)
@@ -2614,7 +2628,7 @@ class TrashDialog(Gtk.Window):
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
         empty = Gtk.Button(label="🧹 Dọn sạch thùng rác"); empty.add_css_class("dlgbtn")
         empty.connect("clicked", self._empty_all)
-        close = Gtk.Button(label="Đóng"); close.connect("clicked", lambda *_: self.close())
+        close = Gtk.Button(label="Đóng"); close.add_css_class("dlgbtn"); close.connect("clicked", lambda *_: self.close())
         brow.append(empty); brow.append(close)
         box.append(brow)
         self.set_child(box)
@@ -2676,7 +2690,7 @@ class TagsDialog(Gtk.Window):
         self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.append(self.list_box)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        close = Gtk.Button(label="Đóng"); close.connect("clicked", lambda *_: self.close())
+        close = Gtk.Button(label="Đóng"); close.add_css_class("dlgbtn"); close.connect("clicked", lambda *_: self.close())
         brow.append(close); box.append(brow)
         self.set_child(box)
         self._load()
@@ -2731,7 +2745,7 @@ class SearchDialog(Gtk.Window):
         self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.append(self.list_box)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        close = Gtk.Button(label="Đóng"); close.connect("clicked", lambda *_: self.close())
+        close = Gtk.Button(label="Đóng"); close.add_css_class("dlgbtn"); close.connect("clicked", lambda *_: self.close())
         brow.append(close); box.append(brow)
         self.set_child(box)
         try:
@@ -2780,7 +2794,7 @@ class RestoreDialog(Gtk.Window):
         self.status = Gtk.Label(label="", xalign=0, wrap=True, css_classes=["mut"])
         box.append(self.status)
         brow = Gtk.Box(spacing=8); brow.set_halign(Gtk.Align.END)
-        close = Gtk.Button(label="Đóng"); close.connect("clicked", lambda *_: self.close())
+        close = Gtk.Button(label="Đóng"); close.add_css_class("dlgbtn"); close.connect("clicked", lambda *_: self.close())
         brow.append(close); box.append(brow)
         self.set_child(box)
         self._load()
@@ -2901,9 +2915,66 @@ class SyncDialog(Gtk.Window):
         brs.connect("clicked", lambda *_: RestoreDialog(self, self.on_done).present())
         brow2.append(bcsv); brow2.append(brs)
         box.append(brow2)
+        box.append(Gtk.Label(label="ĐỒNG BỘ QUA THƯ MỤC CHUNG", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Nếu hai máy cùng thấy một thư mục (Google Drive / Dropbox / thư mục "
+                                   "mạng), xuất dữ liệu ra đó rồi sang máy kia nhập vào — khỏi cần "
+                                   "Tailscale hay địa chỉ IP.",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        drow = Gtk.Box(spacing=8)
+        self.sync_dir = Gtk.Entry(placeholder_text="Đường dẫn thư mục chung…")
+        self.sync_dir.set_text(SETTINGS.get("sync_dir", ""))
+        self.sync_dir.set_hexpand(True)
+        drow.append(self.sync_dir)
+        bx1 = Gtk.Button(label="⬆ Xuất ra thư mục"); bx1.add_css_class("dlgbtn")
+        bx1.connect("clicked", self._dir_export)
+        bx2 = Gtk.Button(label="⬇ Nhập từ thư mục"); bx2.add_css_class("dlgbtn")
+        bx2.connect("clicked", self._dir_import)
+        drow.append(bx1); drow.append(bx2)
+        box.append(drow)
         self.status = Gtk.Label(label="", xalign=0, wrap=True, css_classes=["mut"])
         box.append(self.status)
         self.set_child(box)
+
+    def _dir_path(self):
+        d = self.sync_dir.get_text().strip()
+        if d:
+            SETTINGS["sync_dir"] = d; save_settings(SETTINGS)
+        return d
+
+    def _dir_export(self, *_):
+        d = self._dir_path()
+        if not d:
+            self.status.set_text("⚠ Chưa nhập thư mục chung.")
+            return
+        try:
+            os.makedirs(d, exist_ok=True)
+            data = api("GET", "/api/export")
+            with open(os.path.join(d, "shini-tasks-sync.json"), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            self.status.set_text("✓ Đã xuất file shini-tasks-sync.json ra thư mục chung — "
+                                 "sang máy kia mở hộp này và bấm 'Nhập từ thư mục'.")
+        except Exception as e:
+            self.status.set_text(f"⚠ Xuất không được: {e}")
+
+    def _dir_import(self, *_):
+        d = self._dir_path()
+        p = os.path.join(d, "shini-tasks-sync.json") if d else ""
+        if not d or not os.path.exists(p):
+            self.status.set_text("⚠ Không thấy file shini-tasks-sync.json trong thư mục đó.")
+            return
+        try:
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+            r = api("POST", "/api/import", data)
+            msg = (f"✓ Đã nhập: +{r.get('inserted', 0)} việc mới, {r.get('updated', 0)} cập nhật, "
+                   f"{r.get('skipped', 0)} bỏ qua.")
+            if r.get("overwritten"):
+                msg += (f"\n⚠ {r['overwritten']} việc bị GHI ĐÈ vì nội dung khác nhau "
+                        "(bản mới hơn thắng) — kiểm tra lại các việc vừa sửa.")
+            self.status.set_text(msg)
+            self.on_done()
+        except Exception as e:
+            self.status.set_text(f"⚠ Nhập không được: {e}")
 
     def _save_peer(self, *_):
         SETTINGS["peer_url"] = self.peer.get_text().strip()
@@ -3429,8 +3500,25 @@ class MainWindow(Adw.ApplicationWindow):
         _mg = Gtk.GestureClick(); _mg.connect("released", self._map_click)
         self.map_area.add_controller(_mg)
         map_scroll = Gtk.ScrolledWindow(); map_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        map_scroll.set_child(self.map_area)
-        self.stack.add_named(map_scroll, "mindmap")
+        map_scroll.set_child(self.map_area); map_scroll.set_vexpand(True)
+        self.map_scroll = map_scroll
+        # Thanh đầu trang Sơ đồ (gói C audit 2026-11-17): gợi ý thu gọn
+        # nhánh + công tắc hiện việc đã xong (trước đây sơ đồ giấu hẳn).
+        self.mm_show_done = False
+        self.mm_collapsed = set()
+        map_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        mhead = Gtk.Box(spacing=10)
+        mhead.set_margin_top(8); mhead.set_margin_bottom(8); mhead.set_margin_start(12); mhead.set_margin_end(12)
+        mhead.append(Gtk.Label(label="Bấm vào tên cột để thu gọn / mở nhánh · bấm vào việc để mở chi tiết",
+                               xalign=0, css_classes=["mut"]))
+        _msp = Gtk.Box(); _msp.set_hexpand(True); mhead.append(_msp)
+        self.mm_done_btn = Gtk.ToggleButton(label="Hiện việc đã xong")
+        self.mm_done_btn.add_css_class("overbtn")
+        self.mm_done_btn.connect("toggled", self._mm_toggle_done)
+        mhead.append(self.mm_done_btn)
+        map_page.append(mhead)
+        map_page.append(map_scroll)
+        self.stack.add_named(map_page, "mindmap")
         _vm = os.environ.get("SHINI_TASKS_VIEW")
         if _vm == "gantt": _vm = "calendar"   # Gantt đã gộp vào Lịch (chế độ Tháng)
         if _vm in ("calendar", "today", "stats", "list", "mindmap"):
@@ -4159,7 +4247,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_month()
         if self.view_mode == "calendar": self._render_calendar()
         if self.view_mode == "today": self._render_today()
-        if self.view_mode == "mindmap": self._render_mindmap()
+        if self.view_mode == "mindmap": self._mm_snap = True; self._render_mindmap()
         if self.view_mode == "stats": self._render_stats()
 
     # ---------- Chế độ LỊCH (lưới thời gian kiểu Google Calendar) ----------
@@ -4180,7 +4268,7 @@ class MainWindow(Adw.ApplicationWindow):
             if mode == "list": self._render_list()
             if mode == "calendar": self._render_calendar()
             if mode == "today": self._render_today()
-            if mode == "mindmap": self._render_mindmap()
+            if mode == "mindmap": self._mm_snap = True; self._render_mindmap()
             if mode == "stats": self._render_stats()
         finally:
             self._switching = False
@@ -4331,8 +4419,73 @@ class MainWindow(Adw.ApplicationWindow):
         bexp = Gtk.Button(label="📸 Xuất báo cáo tuần (PNG)"); bexp.add_css_class("suggested-action")
         bexp.connect("clicked", self._export_report)
         brow.append(bexp)
+        bai = Gtk.Button(label="✨ AI nhận xét tuần"); bai.add_css_class("dlgbtn")
+        bai.set_tooltip_text("Gửi số liệu tuần cho Gemini (key của bạn, ở Cài đặt) — nhận nhận xét + gợi ý tuần tới")
+        bai.connect("clicked", self._ai_week)
+        brow.append(bai)
         brow.append(Gtk.Label(label="Lưu vào thư mục Pictures/Shini Tasks", css_classes=["mut"]))
         box.append(brow)
+
+    # ---------- AI nhận xét tuần (gói D audit 2026-11-17) ----------
+    def _ai_week(self, *_):
+        key = SETTINGS.get("gemini_key") or ""
+        if not key:
+            self._toast("Chưa có Gemini API key — dán key (miễn phí) trong ⚙ Cài đặt ở thanh bên trước đã")
+            SettingsDialog(self).present()
+            return
+        self._toast("✨ AI đang đọc số liệu tuần…")
+        threading.Thread(target=self._ai_week_worker, args=(key,), daemon=True).start()
+
+    def _ai_week_worker(self, key):
+        try:
+            st = self.stats or {}
+            week_ago = (today_() - timedelta(days=7)).isoformat()
+            done7 = [t for t in self.all_tasks if t["status"] == "done"
+                     and (t.get("done_at") or "") >= week_ago]
+            overdue = [t for t in self.all_tasks if is_overdue(t)]
+            open_t = [t for t in self.all_tasks if t["status"] != "done"]
+            facts = (
+                f"Tổng quan: đang mở {st.get('open', len(open_t))} việc, đã xong tất cả {st.get('done_total', 0)} việc, "
+                f"tỉ lệ hoàn thành {st.get('completion_rate', 0)}%, điểm sao trung bình {st.get('avg_rating', 0)}.\n"
+                f"7 ngày qua xong {len(done7)} việc: " + "; ".join(t["title"] for t in done7[:12]) + "\n"
+                f"Đang quá hạn {len(overdue)} việc: " + "; ".join(t["title"] for t in overdue[:8]) + "\n"
+                f"Việc đang mở tiêu biểu: " + "; ".join(t["title"] for t in open_t[:12]))
+            prompt = ("Bạn là trợ lý quản lý việc cá nhân. Dựa trên số liệu thật dưới đây, viết một nhận xét "
+                      "tiếng Việt NGẮN GỌN (150–220 chữ), văn xuôi liền mạch, KHÔNG markdown, theo mạch: "
+                      "tuần qua làm được gì đáng ghi nhận → điểm nghẽn rõ nhất (nêu tên việc cụ thể) → "
+                      "đúng 3 gợi ý hành động cho tuần tới. Giọng thẳng thắn, khích lệ vừa phải, không sáo rỗng.\n\n"
+                      + facts)
+            payload = {"contents": [{"parts": [{"text": prompt}]}],
+                       "generationConfig": {"temperature": 0.4}}
+            req = urllib.request.Request(
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"gemini-2.0-flash:generateContent?key={key}",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as r:
+                out = json.loads(r.read().decode())
+            text = out["candidates"][0]["content"]["parts"][0]["text"].strip()
+            GLib.idle_add(self._ai_week_done, text, None)
+        except Exception as e:
+            GLib.idle_add(self._ai_week_done, None, str(e)[:140])
+
+    def _ai_week_done(self, text, err):
+        if err or not text:
+            self._toast(f"✨ AI chưa nhận xét được ({err or 'phản hồi lạ'})")
+            return False
+        dlg = Gtk.Window(title="✨ AI nhận xét tuần", transient_for=self, modal=True)
+        dlg.set_default_size(520, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16); box.set_margin_bottom(16); box.set_margin_start(16); box.set_margin_end(16)
+        lab = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
+        box.append(lab)
+        ok = Gtk.Button(label="Đóng"); ok.add_css_class("dlgbtn")
+        ok.set_halign(Gtk.Align.END)
+        ok.connect("clicked", lambda *_: dlg.close())
+        box.append(ok)
+        dlg.set_child(box)
+        dlg.present()
+        return False
 
     def _export_report(self, *_):
         try:
@@ -4644,11 +4797,11 @@ class MainWindow(Adw.ApplicationWindow):
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         box.set_margin_top(8); box.set_margin_bottom(8); box.set_margin_start(8); box.set_margin_end(8)
-        b1 = Gtk.Button(label="✎ Đổi tên & màu cột")
+        b1 = Gtk.Button(label="✎ Đổi tên & màu cột"); b1.add_css_class("flat"); b1.add_css_class("dlgflat")
         b1.connect("clicked", lambda *_: (pop.popdown(), ColumnDialog(self, col, self.refresh).present()))
         box.append(b1)
         if len(self.columns) > 1:
-            b2 = Gtk.Button(label="🗑 Xoá cột này")
+            b2 = Gtk.Button(label="🗑 Xoá cột này"); b2.add_css_class("flat"); b2.add_css_class("dlgflat")
             def ask_delete(*_):
                 pop.popdown()
                 body = (f"Xoá cột “{col['name']}”? {n_tasks} việc trong cột sẽ chuyển sang cột đầu tiên "
@@ -4995,7 +5148,7 @@ class MainWindow(Adw.ApplicationWindow):
         wknd = (1, 1, 1, 0.035) if dark else (0, 0, 0, 0.035)
         red = (0.97, 0.44, 0.44) if dark else (0.86, 0.15, 0.15)
         grn = (0.20, 0.83, 0.60) if dark else (0.02, 0.59, 0.41)
-        LABW, HDR, ROWH = 216, 40, 32
+        LABW, HDR, ROWH = 216, 46, 32
         tasks = getattr(self, "_gantt_tasks", [])
         rng = getattr(self, "_gantt_range", None)
         cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
@@ -5007,22 +5160,30 @@ class MainWindow(Adw.ApplicationWindow):
         d0, days, px = rng
         td = today_()
         colmap = {c["id"]: c for c in self.columns}
-        # Nền cuối tuần + lưới ngày + nhãn ngày
+        # Nền cuối tuần + lưới ngày + nhãn ngày: hàng trên là dd/mm ở
+        # thứ Hai và ngày 1; hàng dưới là số ngày của MỌI ngày (gói C —
+        # trước đây chỉ ghi mỗi 7 ngày, khó dò ngày giữa khoảng).
         for i in range(days):
             d = d0 + timedelta(days=i)
             x = LABW + i * px
             if d.weekday() >= 5:
                 cr.set_source_rgba(*wknd); cr.rectangle(x, 0, px, h); cr.fill()
             cr.set_source_rgba(*grid); cr.set_line_width(1)
-            cr.move_to(x + 0.5, HDR - 14); cr.line_to(x + 0.5, h); cr.stroke()
-            if i % 7 == 0 or d.day == 1:
+            cr.move_to(x + 0.5, HDR - 10); cr.line_to(x + 0.5, h); cr.stroke()
+            if d.day == 1 or (d.weekday() == 0 and d.day != 2):
+                # (ngày 2 là thứ Hai ngay sau ngày 1: bỏ nhãn thứ Hai kẻo
+                # hai nhãn dd/mm chồng nhau)
                 cr.set_source_rgb(*mut); cr.set_font_size(10.5)
-                cr.move_to(x + 3, HDR - 20); cr.show_text(d.strftime("%d/%m"))
+                cr.move_to(x + 3, 16); cr.show_text(d.strftime("%d/%m"))
+            cr.set_source_rgba(*mut, 0.8); cr.set_font_size(8.5)
+            _num = str(d.day)
+            _nw = cr.text_extents(_num).width
+            cr.move_to(x + (px - _nw) / 2, 33); cr.show_text(_num)
         # Đường "hôm nay"
         tx = LABW + (td - d0).days * px
         cr.set_source_rgb(*red); cr.set_line_width(1.6)
-        cr.move_to(tx + 0.5, HDR - 14); cr.line_to(tx + 0.5, h); cr.stroke()
-        cr.set_font_size(10.5); cr.move_to(tx + 4, HDR - 20); cr.show_text("hôm nay")
+        cr.move_to(tx + 0.5, HDR - 10); cr.line_to(tx + 0.5, h); cr.stroke()
+        cr.set_font_size(10.5); cr.move_to(tx + 4, 16); cr.show_text("hôm nay")
         # Các thanh việc
         for i, t in enumerate(tasks):
             y = HDR + i * ROWH
@@ -5046,46 +5207,72 @@ class MainWindow(Adw.ApplicationWindow):
             if t["status"] != "done" and (t.get("due_date") or "") < td.isoformat():
                 cr.set_source_rgb(*red); cr.set_line_width(1.6)
                 self._rr(cr, bx + 1, y + 6, bw - 2, ROWH - 12, 6); cr.stroke()
+            # Chữ TRÊN thanh khi thanh đủ rộng (>= 78px) — trước đây thanh
+            # trơn, phải dò sang cột tên mới biết việc gì (gói C).
+            if bw >= 78:
+                cr.set_source_rgb(1, 1, 1); cr.set_font_size(10)
+                cr.move_to(bx + 7, y + ROWH / 2 + 3.5)
+                cr.show_text(self._fit_text(cr, t["title"], bw - 14))
             if t.get("due_time"):
                 cr.set_source_rgb(*txt); cr.set_font_size(10.5)
                 cr.move_to(bx + bw + 5, y + ROWH / 2 + 4); cr.show_text(t["due_time"])
 
     def _gantt_click(self, _g, x, y):
         tasks = getattr(self, "_gantt_tasks", [])
-        i = int((y - 40) // 32)
+        i = int((y - 46) // 32)   # khớp HDR=46 trong _gantt_draw
         if 0 <= i < len(tasks): self.open_task(tasks[i])
 
     # ----- Sơ đồ: Dự án -> Cột -> Việc -> Việc con (mindmap trái sang phải) -----
+    def _mm_toggle_done(self, b):
+        self.mm_show_done = b.get_active()
+        self._mm_snap = True
+        self._render_mindmap()
+
     def _render_mindmap(self):
         proj = next((p for p in self.projects if p["id"] == self.cur_project), None)
         cols = [c for c in self.columns if c.get("project_id") == self.cur_project] or list(self.columns)
         first_id = cols[0]["id"] if cols else None
         ROWH = 27
+        SUBCAP = 5   # tối đa 5 dòng việc con mỗi việc — quá thì gộp "+N nữa"
         X = {"root": 14, "col": 216, "task": 452, "sub": 712}
         W = {"root": 158, "col": 192, "task": 216, "sub": 236}
         nodes, y = [], 16
         for c in cols:
             tasks = [t for t in self.all_tasks
-                     if t["status"] != "done" and self._passes(t)
+                     if (self.mm_show_done or t["status"] != "done") and self._passes(t)
                      and (t.get("project_id") or self.cur_project) == self.cur_project
                      and (t.get("column_id") or first_id) == c["id"]]
             if not tasks: continue
+            collapsed = c["id"] in self.mm_collapsed
             y0, laid = y, []
-            for t in tasks:
-                subs = t.get("subtasks") or []
-                th = max(1, len(subs)) * ROWH
-                laid.append((t, y, th))
-                y += th
+            if collapsed:
+                y += ROWH + 3
+            else:
+                for t in tasks:
+                    subs = t.get("subtasks") or []
+                    shown = min(len(subs), SUBCAP) + (1 if len(subs) > SUBCAP else 0)
+                    th = max(1, shown) * ROWH
+                    laid.append((t, y, th))
+                    y += th
             colnode = {"kind": "col", "x": X["col"], "y": (y0 + y - 26) / 2, "w": W["col"], "h": 26,
-                       "label": c["name"], "color": c.get("color") or "#60A5FA", "task": None}
+                       "label": c["name"] + (f" · {len(tasks)} việc" if collapsed else ""),
+                       "color": c.get("color") or "#60A5FA", "task": None,
+                       "col_id": c["id"], "collapsed": collapsed}
             nodes.append(colnode)
             for t, ty, th in laid:
                 tn = {"kind": "task", "x": X["task"], "y": ty + (th - 24) / 2, "w": W["task"], "h": 24,
-                      "label": t["title"], "task": t, "parent": colnode}
+                      "label": t["title"], "task": t, "parent": colnode,
+                      "done": t["status"] == "done"}
                 nodes.append(tn)
-                for j, s in enumerate(t.get("subtasks") or []):
+                subs = t.get("subtasks") or []
+                for j, s in enumerate(subs[:SUBCAP]):
                     nodes.append({"kind": "sub", "x": X["sub"], "y": ty + j * ROWH + 2, "w": W["sub"], "h": 22,
                                   "label": s.get("t") or "", "done": bool(s.get("done")),
+                                  "task": t, "parent": tn})
+                if len(subs) > SUBCAP:
+                    nodes.append({"kind": "more", "x": X["sub"], "y": ty + SUBCAP * ROWH + 2,
+                                  "w": W["sub"], "h": 22,
+                                  "label": f"+ {len(subs) - SUBCAP} việc con nữa…",
                                   "task": t, "parent": tn})
         total_h = max(y + 16, 170)
         if proj and any(n["kind"] == "col" for n in nodes):
@@ -5097,6 +5284,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._map_nodes = nodes
         self.map_area.set_size_request(X["sub"] + W["sub"] + 24, total_h)
         self.map_area.queue_draw()
+        # Vào view / dữ liệu mới từ refresh -> về đầu sơ đồ; thao tác
+        # gập/mở nhánh tại chỗ thì GIỮ vị trí cuộn (cờ _mm_snap do nơi
+        # gọi refresh/chuyển view đặt, hàm này tự tắt sau khi dùng).
+        if getattr(self, "_mm_snap", False):
+            self._mm_snap = False
+            def _top():
+                try: self.map_scroll.get_vadjustment().set_value(0)
+                except Exception: pass
+                return False
+            GLib.idle_add(_top)
 
     def _map_draw(self, area, cr, w, h):
         dark = SETTINGS["theme"] == "dark"
@@ -5133,12 +5330,18 @@ class MainWindow(Adw.ApplicationWindow):
                 cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.BOLD)
                 cr.set_font_size(13 if n["kind"] == "root" else 12.5)
             elif n["kind"] == "task":
-                cr.set_source_rgb(*cardbg); self._rr(cr, x, y, nw, nh, 7); cr.fill()
+                if n.get("done"):
+                    cr.set_source_rgba(*cardbg, 0.45)
+                else:
+                    cr.set_source_rgb(*cardbg)
+                self._rr(cr, x, y, nw, nh, 7); cr.fill()
                 sel = n["task"] and getattr(self, "selected_id", None) == n["task"]["id"]
                 cr.set_source_rgb(*(accent if sel else cardbd))
                 cr.set_line_width(2 if sel else 1.2)
                 self._rr(cr, x, y, nw, nh, 7); cr.stroke()
-                cr.set_source_rgb(*txt); cr.set_font_size(12)
+                cr.set_source_rgb(*(mut if n.get("done") else txt)); cr.set_font_size(12)
+            elif n["kind"] == "more":
+                cr.set_source_rgb(*mut); cr.set_font_size(11.5)
             else:
                 cr.set_source_rgba(*cardbg, 0.55); self._rr(cr, x, y, nw, nh, 6); cr.fill()
                 cr.set_source_rgb(*cardbd); cr.set_line_width(1)
@@ -5148,6 +5351,28 @@ class MainWindow(Adw.ApplicationWindow):
             fitted = self._fit_text(cr, label, nw - 18)
             cr.move_to(x + 10, y + nh / 2 + 4.5)
             cr.show_text(fitted)
+            if n["kind"] in ("root", "col"):
+                # Tam giác thu gọn/mở nhánh ở mép phải hộp — VẼ BẰNG NÉT
+                # cairo (glyph ▸/▾ qua font toy hóa ô tofu, cùng bài học
+                # với dấu ✓). Gốc: hướng phải khi MỌI cột đều đang gập.
+                if n["kind"] == "root":
+                    _cols = [m for m in nodes if m["kind"] == "col"]
+                    _folded = bool(_cols) and all(m.get("collapsed") for m in _cols)
+                else:
+                    _folded = bool(n.get("collapsed"))
+                cr.set_source_rgb(1, 1, 1)
+                cx, cy = x + nw - 13, y + nh / 2
+                if _folded:   # tam giác trỏ PHẢI
+                    cr.move_to(cx - 3, cy - 5); cr.line_to(cx + 4, cy); cr.line_to(cx - 3, cy + 5)
+                else:         # tam giác trỏ XUỐNG
+                    cr.move_to(cx - 5, cy - 3); cr.line_to(cx + 5, cy - 3); cr.line_to(cx, cy + 4)
+                cr.close_path(); cr.fill()
+            if n["kind"] == "task" and n.get("done"):
+                tw = cr.text_extents(fitted).width
+                cr.set_source_rgb(*mut); cr.set_line_width(1.2)
+                cr.move_to(x + 10, y + nh / 2)
+                cr.line_to(x + 10 + tw, y + nh / 2)
+                cr.stroke()
             if n["kind"] == "sub" and n.get("done"):
                 # Gạch ngang việc con đã xong (vẽ bằng nét cairo — không phụ
                 # thuộc glyph ✓, font hệ thống nào cũng hiện đúng)
@@ -5159,8 +5384,23 @@ class MainWindow(Adw.ApplicationWindow):
             cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
 
     def _map_click(self, _g, x, y):
-        for n in reversed(getattr(self, "_map_nodes", [])):
-            if n.get("task") and n["x"] <= x <= n["x"] + n["w"] and n["y"] <= y <= n["y"] + n["h"]:
+        nodes = getattr(self, "_map_nodes", [])
+        for n in reversed(nodes):
+            if not (n["x"] <= x <= n["x"] + n["w"] and n["y"] <= y <= n["y"] + n["h"]):
+                continue
+            if n["kind"] == "col":
+                cid = n.get("col_id")
+                if cid in self.mm_collapsed: self.mm_collapsed.discard(cid)
+                else: self.mm_collapsed.add(cid)
+                self._render_mindmap(); return
+            if n["kind"] == "root":
+                col_ids = [m.get("col_id") for m in nodes if m["kind"] == "col"]
+                if all(cid in self.mm_collapsed for cid in col_ids):
+                    self.mm_collapsed.clear()
+                else:
+                    self.mm_collapsed = set(col_ids)
+                self._render_mindmap(); return
+            if n.get("task"):
                 self.open_task(n["task"]); return
 
     # ---------- VIEW DANH SÁCH (v1.5.0 — tab thứ hai sau Bảng) ----------

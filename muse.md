@@ -363,3 +363,39 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   thành nạp mọi khóa đã lưu. Test: test_fix_b.py 6/6 trên bản sao;
   render kiểm chứng WelcomeDialog + SettingsDialog (tối) và thanh bên
   (sáng). Chưa release — chờ lệnh của Sinh.
+- 2026-11-17 (gói C theo audit — giao diện): (1) Quét nút thiếu class
+  trong MỌI dialog: 9 nút Huỷ/Đóng/Về mặc định (Column/Confirm/Project/
+  Labels/Trash/Tags/Search/Restore) + 2 nút trong popover ⋯ của cột
+  không mang class nào -> theme Sweet lọt vào; đã gán dlgbtn (và
+  flat+dlgflat cho popover). Nút ngày lịch cal-day là dương tính giả.
+  (2) Sơ đồ: thêm thanh đầu trang (gợi ý + công tắc "Hiện việc đã
+  xong" — việc xong vẽ mờ + gạch ngang tiêu đề); bấm tên CỘT để thu
+  gọn/mở nhánh (cột gập hiện "· N việc"), bấm nút GỐC gập/mở tất cả;
+  việc con tối đa 5 dòng + dòng "+N việc con nữa…"; mốc gập là TAM
+  GIÁC VẼ BẰNG CAIRO (glyph ▸/▾ hoá tofu qua font toy — cùng bài học
+  dấu ✓); cờ _mm_snap: vào view/dữ liệu mới/đổi công tắc xong thì về
+  đầu sơ đồ, gập nhánh tại chỗ thì giữ vị trí cuộn. (3) Lịch Tháng:
+  HDR 40->46, thêm hàng SỐ NGÀY cho mọi ngày, nhãn dd/mm chỉ ở ngày 1
+  và thứ Hai (trừ thứ Hai ngày 2 kẻo chồng nhãn ngày 1), thanh >= 78px
+  hiện tiêu đề trắng trên thanh; _gantt_click đồng bộ HDR 46. (4) CSS
+  :focus-visible (viền accent 2px) cho button/entry/searchentry/
+  dropdown/spinbutton/textview ở cả hai theme. Chiều cao thẻ không đều
+  + thiếu animation là trần GTK — ghi nhận, không sửa được bằng CSS.
+- 2026-11-17 (gói D theo audit — phát triển): (1) Đóng gói Linux:
+  server.py + app.py hỗ trợ biến SHINI_TASKS_DATA (ưu tiên cao nhất)
+  cho thư mục dữ liệu/settings/token; packaging/build-deb.sh dựng
+  .deb (code /usr/share/shini-tasks chỉ đọc, launcher /usr/bin/
+  shini-tasks, 2 file .desktop gồm bản Bắt việc nhanh NoDisplay,
+  systemd user unit, icon.svg, postinst hướng dẫn enable engine).
+  ĐÃ TEST dạng staged trên máy Linux của Sinh: giải nén .deb, engine
+  chạy từ /usr/share với dữ liệu tách riêng (tự sinh db + token),
+  app mở ra đúng trải nghiệm người dùng mới. Chưa cài thật bằng dpkg
+  trên máy nào (tránh đụng hệ thống đang chạy) và chưa đưa .deb lên
+  release — chờ lệnh phát hành. (2) Đồng bộ qua THƯ MỤC CHUNG trong
+  SyncDialog: xuất/nhập shini-tasks-sync.json (nhớ sync_dir trong
+  settings, báo cả số việc ghi đè của gói A). (3) Thống kê thêm nút
+  "✨ AI nhận xét tuần": gom số liệu thật (xong 7 ngày, quá hạn, tỉ lệ
+  hoàn thành, sao) gửi Gemini bằng key của người dùng -> hộp thoại
+  nhận xét 150–220 chữ + 3 gợi ý; chưa có key thì mời mở Cài đặt.
+  Roadmap còn lại (chưa làm, đã ghi trong AUDIT): companion điện thoại
+  thật, Google Calendar 2 chiều, Flatpak.
