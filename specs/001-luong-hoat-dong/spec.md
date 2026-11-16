@@ -249,9 +249,13 @@ thanh đúng vị trí.
    ngày vẫn được tính vào thống kê.
 2. **Given** một việc đã xong, **When** người dùng chọn "Làm lại", **Then**
    việc mang dấu làm lại để nhìn thấy ngay trong popup chi tiết.
-3. **Given** các việc có ngày bắt đầu và hạn, **When** mở Gantt, **Then**
-   mỗi việc là một thanh từ ngày bắt đầu tới hạn, có đường đánh dấu hôm
-   nay; việc quá hạn viền đỏ, việc xong màu xanh mờ.
+3. **Given** các việc có ngày bắt đầu và hạn, **When** mở Lịch ở chế độ
+   Tháng, **Then** mỗi việc là một thanh từ ngày bắt đầu tới hạn trong
+   đúng tháng đang xem, có đường đánh dấu hôm nay; việc quá hạn viền đỏ,
+   việc xong màu xanh mờ. (Chế độ Tháng này thay cho tab Gantt riêng —
+   gộp 2026-11-17 theo yêu cầu của chủ dự án vì Gantt và Lịch giống
+   nhau; phần riêng của Gantt là thanh kéo dài ngày và tầm nhìn xa,
+   nay nằm trong Lịch.)
 4. **Given** một dự án đang chọn, **When** mở Sơ đồ, **Then** cây hiện
    dự án → các cột → các việc đang mở → việc con, bấm vào một việc là mở
    popup chi tiết của nó.
@@ -354,8 +358,9 @@ sống lại.
 - **FR-018**: Việc đã xong MUST chấm sao (0–5) và phê duyệt được (chưa
   duyệt / đã duyệt / làm lại).
 - **FR-019**: Cùng một dữ liệu MUST nhìn được ở các dạng: Bảng, Danh sách,
-  Lịch, Hôm nay, Gantt, Sơ đồ cây, Thống kê; lọc theo nhãn/người làm/quá
-  hạn và tìm kiếm toàn cục gồm cả nội dung bình luận.
+  Lịch (ba chế độ Ngày / Tuần / Tháng — chế độ Tháng là dòng thời gian
+  thanh bắt đầu→hạn), Hôm nay, Sơ đồ cây, Thống kê; lọc theo nhãn/người
+  làm/quá hạn và tìm kiếm toàn cục gồm cả nội dung bình luận.
 - **FR-020**: Xoá việc MUST là xoá mềm vào thùng rác, khôi phục được
   trong 30 ngày; việc xong MUST được lưu trữ cho thống kê trước khi dọn
   sau 15 ngày.

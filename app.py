@@ -2982,7 +2982,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._parse_src = 0
         self.view_mode = "board"          # "board" = bảng cột như cũ · "calendar" = lưới lịch
         self.cal_offset = 0               # số tuần lệch so với tuần này (chế độ Tuần)
-        self.cal_gran = "week"            # "week" | "day"
+        self.cal_month_off = 0            # số tháng lệch so với tháng này (chế độ Tháng)
+        self.cal_gran = "week"            # "week" | "day" | "month"
         self.cal_day = today_()           # ngày đang xem (chế độ Ngày)
         self._caltask_providers = {}
         self._col_providers = {}
@@ -3093,7 +3094,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.btn_list = Gtk.ToggleButton(label="☰ Danh sách"); self.btn_list.add_css_class("viewtab")
         self.btn_cal = Gtk.ToggleButton(label="📅 Lịch"); self.btn_cal.add_css_class("viewtab")
         self.btn_today = Gtk.ToggleButton(label="☀ Hôm nay"); self.btn_today.add_css_class("viewtab")
-        self.btn_gantt = Gtk.ToggleButton(label="▤ Gantt"); self.btn_gantt.add_css_class("viewtab")
         self.btn_map = Gtk.ToggleButton(label="🗺 Sơ đồ"); self.btn_map.add_css_class("viewtab")
         self.btn_stats = Gtk.ToggleButton(label="📊 Thống kê"); self.btn_stats.add_css_class("viewtab")
         self.btn_board.set_active(True); self.btn_board.add_css_class("viewtab-on")
@@ -3101,11 +3101,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.btn_list.connect("toggled", lambda b: self._set_view("list") if b.get_active() else None)
         self.btn_cal.connect("toggled", lambda b: self._set_view("calendar") if b.get_active() else None)
         self.btn_today.connect("toggled", lambda b: self._set_view("today") if b.get_active() else None)
-        self.btn_gantt.connect("toggled", lambda b: self._set_view("gantt") if b.get_active() else None)
         self.btn_map.connect("toggled", lambda b: self._set_view("mindmap") if b.get_active() else None)
         self.btn_stats.connect("toggled", lambda b: self._set_view("stats") if b.get_active() else None)
         for _b in (self.btn_board, self.btn_list, self.btn_cal, self.btn_today,
-                   self.btn_gantt, self.btn_map, self.btn_stats): tabs.append(_b)
+                   self.btn_map, self.btn_stats): tabs.append(_b)
         vh.append(tabs)
         qrow = Gtk.Box(spacing=8)
         self.quick = Gtk.Entry(placeholder_text="Thêm nhanh…")
@@ -3163,13 +3162,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.gran_week.set_active(True); self.gran_week.add_css_class("viewbtn-on")
         self.gran_week.connect("toggled", lambda b: self._set_gran("week") if b.get_active() else None)
         self.gran_day.connect("toggled", lambda b: self._set_gran("day") if b.get_active() else None)
+        self.gran_month = Gtk.ToggleButton(label="Tháng"); self.gran_month.add_css_class("viewbtn")
+        self.gran_month.connect("toggled", lambda b: self._set_gran("month") if b.get_active() else None)
         nav.append(self.cal_prev); nav.append(self.cal_today_btn); nav.append(self.cal_next)
         nav.append(self.cal_title)
         self.btn_auto = Gtk.Button(label="⚡ Tự xếp"); self.btn_auto.add_css_class("dlgbtn")
         self.btn_auto.set_tooltip_text("Tự điền giờ cho các việc chưa xếp giờ vào ô trống trong tuần đang xem")
         self.btn_auto.connect("clicked", self._auto_schedule)
         nav.append(self.btn_auto)
-        nav.append(self.gran_week); nav.append(self.gran_day)
+        nav.append(self.gran_week); nav.append(self.gran_day); nav.append(self.gran_month)
         cal_page.append(nav)
         self.unsched_box = Gtk.Box(spacing=6); self.unsched_box.set_margin_bottom(8)
         cal_page.append(self.unsched_box)
@@ -3215,14 +3216,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.add_named(cal_page, "calendar")
         self.stack.add_named(today_scroll, "today")
         self.stack.add_named(stats_scroll, "stats")
-        # Trang GANTT (gói Coogo v1.6.0): thanh thời gian bắt đầu -> hạn
+        # Chế độ THÁNG của trang LỊCH: dòng thời gian bắt đầu -> hạn.
+        # (Gộp từ tab Gantt cũ — Sinh chốt 2026-11-17: Gantt và Lịch giống
+        # nhau; phần riêng của Gantt là thanh kéo dài ngày + nhìn xa nhiều
+        # tuần, đưa hết vào Lịch thành chế độ Tháng, xoá tab Gantt.)
         self.gantt_area = Gtk.DrawingArea()
         self.gantt_area.set_draw_func(self._gantt_draw)
         _gg = Gtk.GestureClick(); _gg.connect("released", self._gantt_click)
         self.gantt_area.add_controller(_gg)
-        gantt_scroll = Gtk.ScrolledWindow(); gantt_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        gantt_scroll.set_child(self.gantt_area)
-        self.stack.add_named(gantt_scroll, "gantt")
+        self.tl_scroll = Gtk.ScrolledWindow(); self.tl_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.tl_scroll.set_child(self.gantt_area)
+        self.tl_scroll.set_vexpand(True)
+        self.tl_scroll.set_visible(False)
+        cal_page.append(self.tl_scroll)
         # Trang SƠ ĐỒ (mindmap Dự án -> Cột -> Việc -> Việc con)
         self.map_area = Gtk.DrawingArea()
         self.map_area.set_draw_func(self._map_draw)
@@ -3231,14 +3237,19 @@ class MainWindow(Adw.ApplicationWindow):
         map_scroll = Gtk.ScrolledWindow(); map_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         map_scroll.set_child(self.map_area)
         self.stack.add_named(map_scroll, "mindmap")
-        if os.environ.get("SHINI_TASKS_VIEW") in ("calendar", "today", "stats", "list", "gantt", "mindmap"):
-            vm = os.environ["SHINI_TASKS_VIEW"]
-            self.view_mode = vm
-            self.stack.set_visible_child_name(vm)
+        _vm = os.environ.get("SHINI_TASKS_VIEW")
+        if _vm == "gantt": _vm = "calendar"   # Gantt đã gộp vào Lịch (chế độ Tháng)
+        if _vm in ("calendar", "today", "stats", "list", "mindmap"):
+            self.view_mode = _vm
+            self.stack.set_visible_child_name(_vm)
             self.btn_board.set_active(False); self.btn_board.remove_css_class("viewtab-on")
             on = {"calendar": self.btn_cal, "today": self.btn_today, "stats": self.btn_stats,
-                  "list": self.btn_list, "gantt": self.btn_gantt, "mindmap": self.btn_map}[vm]
+                  "list": self.btn_list, "mindmap": self.btn_map}[_vm]
             on.set_active(True); on.add_css_class("viewtab-on")
+            if os.environ.get("SHINI_TASKS_VIEW") == "gantt":
+                self.cal_gran = "month"
+                self.gran_week.set_active(False); self.gran_week.remove_css_class("viewbtn-on")
+                self.gran_month.set_active(True); self.gran_month.add_css_class("viewbtn-on")
         main.append(self.stack)
         body.set_end_child(main)
         # Panel chi tiết BÊN PHẢI (v1.5.0) — ẩn cho tới khi chọn một việc
@@ -3921,7 +3932,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_month()
         if self.view_mode == "calendar": self._render_calendar()
         if self.view_mode == "today": self._render_today()
-        if self.view_mode == "gantt": self._render_gantt()
         if self.view_mode == "mindmap": self._render_mindmap()
         if self.view_mode == "stats": self._render_stats()
 
@@ -3935,7 +3945,7 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             self.view_mode = mode
             for btn, m in ((self.btn_board, "board"), (self.btn_list, "list"), (self.btn_cal, "calendar"),
-                           (self.btn_today, "today"), (self.btn_gantt, "gantt"),
+                           (self.btn_today, "today"),
                            (self.btn_map, "mindmap"), (self.btn_stats, "stats")):
                 btn.set_active(m == mode)
                 (btn.add_css_class if m == mode else btn.remove_css_class)("viewtab-on")
@@ -3943,7 +3953,6 @@ class MainWindow(Adw.ApplicationWindow):
             if mode == "list": self._render_list()
             if mode == "calendar": self._render_calendar()
             if mode == "today": self._render_today()
-            if mode == "gantt": self._render_gantt()
             if mode == "mindmap": self._render_mindmap()
             if mode == "stats": self._render_stats()
         finally:
@@ -3954,7 +3963,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._switching = True
         try:
             self.cal_gran = gran
-            for btn, g in ((self.gran_week, "week"), (self.gran_day, "day")):
+            for btn, g in ((self.gran_week, "week"), (self.gran_day, "day"), (self.gran_month, "month")):
                 btn.set_active(g == gran)
                 (btn.add_css_class if g == gran else btn.remove_css_class)("viewbtn-on")
             self._render_calendar()
@@ -4145,11 +4154,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _cal_nav(self, _btn, step):
         if self.cal_gran == "week": self.cal_offset += step
+        elif self.cal_gran == "month": self.cal_month_off += step
         else: self.cal_day += timedelta(days=step)
         self._render_calendar()
 
     def _cal_today(self, *_):
-        self.cal_offset = 0; self.cal_day = today_()
+        self.cal_offset = 0; self.cal_month_off = 0; self.cal_day = today_()
         self._render_calendar()
 
     def _cal_days(self):
@@ -4167,6 +4177,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._caltask_providers[cid] = prov
 
     def _render_calendar(self):
+        if self.cal_gran == "month":
+            # Chế độ Tháng = dòng thời gian: hiện vùng timeline, ẩn lưới
+            # giờ + dải chưa xếp giờ + nút Tự xếp (chỉ có nghĩa ở Tuần/Ngày).
+            self.cal_scroll.set_visible(False)
+            self.unsched_box.set_visible(False)
+            self.btn_auto.set_visible(False)
+            self.tl_scroll.set_visible(True)
+            self._render_timeline()
+            return
+        self.cal_scroll.set_visible(True)
+        self.unsched_box.set_visible(True)
+        self.btn_auto.set_visible(True)
+        self.tl_scroll.set_visible(False)
         SLOT0, STEP, ROWS = 6 * 60, 30, 36   # 06:00 -> 24:00, mỗi ô 30 phút
         days = self._cal_days()
         VN = ["Thứ Hai","Thứ Ba","Thứ Tư","Thứ Năm","Thứ Sáu","Thứ Bảy","Chủ Nhật"]
@@ -4707,30 +4730,30 @@ class MainWindow(Adw.ApplicationWindow):
         return text + "…" if text else ""
 
     # ----- Gantt: mỗi việc một thanh từ ngày bắt đầu tới hạn -----
-    def _render_gantt(self):
+    def _render_timeline(self):
+        """Chế độ Tháng của Lịch (gộp từ Gantt v1.6.0): mỗi việc có ngày
+        bắt đầu/hạn là một thanh từ ngày bắt đầu tới hạn, trong đúng tháng
+        đang xem (cal_month_off). Bấm vào hàng = mở việc đó."""
+        td = today_()
+        y0, m0 = td.year, td.month + self.cal_month_off
+        y0 += (m0 - 1) // 12; m0 = (m0 - 1) % 12 + 1
+        first = date(y0, m0, 1)
+        nxt = date(y0 + (1 if m0 == 12 else 0), 1 if m0 == 12 else m0 + 1, 1)
+        ndays = (nxt - first).days
+        last = first + timedelta(days=ndays - 1)
+        self.cal_title.set_text(f"Tháng {m0:02d}/{y0}")
         tasks = [t for t in self.all_tasks
                  if self._passes(t)
                  and (t.get("project_id") or self.cur_project) == self.cur_project
-                 and (t.get("due_date") or t.get("start_date"))]
+                 and (t.get("due_date") or t.get("start_date"))
+                 and (t.get("start_date") or t.get("due_date")) <= last.isoformat()
+                 and (t.get("due_date") or t.get("start_date")) >= first.isoformat()]
         tasks.sort(key=lambda t: (t.get("start_date") or t.get("due_date") or "9999",
                                   t.get("due_date") or "9999"))
         self._gantt_tasks = tasks
-        if not tasks:
-            self._gantt_range = None
-            self.gantt_area.set_size_request(640, 120)
-            self.gantt_area.queue_draw()
-            return
-        marks = []
-        for t in tasks:
-            marks += [t.get("start_date") or t.get("due_date"),
-                      t.get("due_date") or t.get("start_date")]
-        td = today_()
-        d0 = min(date.fromisoformat(min(marks)) - timedelta(days=3), td - timedelta(days=3))
-        d1 = max(date.fromisoformat(max(marks)) + timedelta(days=7), td + timedelta(days=10))
-        days = max(21, (d1 - d0).days)
         px = 26
-        self._gantt_range = (d0, days, px)
-        self.gantt_area.set_size_request(216 + days * px + 16, 40 + len(tasks) * 32 + 14)
+        self._gantt_range = (first, ndays, px)
+        self.gantt_area.set_size_request(216 + ndays * px + 16, 40 + max(1, len(tasks)) * 32 + 14)
         self.gantt_area.queue_draw()
 
     def _gantt_draw(self, area, cr, w, h):
@@ -4748,7 +4771,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not tasks or not rng:
             cr.set_source_rgb(*mut); cr.set_font_size(13)
             cr.move_to(16, 40)
-            cr.show_text("Chưa có việc nào có ngày bắt đầu / hạn để vẽ Gantt — đặt hạn cho việc là thanh sẽ hiện ở đây.")
+            cr.show_text("Tháng này chưa có việc nào có ngày bắt đầu / hạn — đặt hạn cho việc là thanh sẽ hiện ở đây.")
             return
         d0, days, px = rng
         td = today_()
@@ -4775,6 +4798,8 @@ class MainWindow(Adw.ApplicationWindow):
             s = date.fromisoformat(t.get("start_date") or t.get("due_date"))
             e = date.fromisoformat(t.get("due_date") or t.get("start_date"))
             if e < s: s, e = e, s
+            # Kẹp trong khoảng đang vẽ (việc kéo dài qua mép tháng)
+            s = max(s, d0); e = min(e, d0 + timedelta(days=days - 1))
             cr.set_source_rgb(*mut if t["status"] == "done" else txt)
             cr.set_font_size(12)
             cr.move_to(10, y + ROWH / 2 + 4)

@@ -304,3 +304,15 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   + release một lần cho cả chùm. Đã ghi vào mục 5 ở trên và constitution
   (lên v1.0.1). Hai bản v1.6.3/v1.6.4 vừa đăng trước lệnh này vẫn giữ
   nguyên trên GitHub.
+- **Gộp Gantt vào Lịch (2026-11-17 00:38, lệnh của Sinh — CHƯA phát
+  hành, chỉ deploy máy anh theo chính sách mới, version giữ 1.6.4):**
+  tab Gantt bị xoá hẳn; phần riêng của Gantt (thanh bắt đầu→hạn + nhìn
+  xa) thành **chế độ Tháng** của Lịch — nút chuyển nay là Tuần/Ngày/
+  Tháng, `cal_month_off` + `_cal_nav`/`_cal_today` theo tháng,
+  `_render_timeline()` (từ `_render_gantt`) khoá khoảng vẽ đúng tháng
+  đang xem và kẹp thanh ở mép tháng; ở chế độ Tháng ẩn lưới giờ, dải
+  chưa xếp giờ và nút Tự xếp. Tên nội bộ `_gantt_*` giữ nguyên để khỏi
+  churn; hook test `SHINI_TASKS_VIEW=gantt` nay mở Lịch+Tháng. Đã ghi
+  ngược vào spec 001 (FR-019 + Story 7 kịch bản 3). Kiểm chứng: render
+  Tháng theme tối (thanh/đường hôm nay/nhãn ngày đúng dữ liệu thật) +
+  render Tuần theme sáng không đổi.
