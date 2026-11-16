@@ -227,6 +227,16 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   (✕ / Esc / click ra ngoài) đi qua `MainWindow.request_close_pane()` →
   hộp hỏi Lưu và đóng / Bỏ thay đổi / Ở lại. Các trường chọn-bấm lưu ngay
   nên không hỏi.
+- **v1.6.2 (2026-11-16) — Chữ trong popup thả xuống của DropDown bị chìm.**
+  Danh sách chọn của Gtk.DropDown (listview bên trong popover) chưa từng
+  được ghim màu hàng/nhãn — theme Sweet nuốt mất chữ (theme sáng: chữ xám
+  nhạt trên nền trắng, gần như tàng hình). Đã ghim ở đuôi cả 2 theme:
+  `popover listview/listbox > row` + `row label` + `row:selected`. Kiểm
+  chứng bằng probe mở thật popup của ô Dự án và render popover bằng chính
+  kỹ thuật snapshot của app (WidgetPaintable → Gsk.CairoRenderer): sáng
+  và tối đều rõ. Bài học probe: `get_current_image()` trả Paintable chứ
+  không phải Texture (không có save_to_png); ngoại lệ trong callback GLib
+  làm app treo tới timeout thay vì thoát — luôn bọc try/finally + quit.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 

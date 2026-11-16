@@ -57,7 +57,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.6.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.6.2"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -166,6 +166,14 @@ button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; borde
 button.starbtn.on { color: #FBBF24; }
 .panebackdrop { background: rgba(4, 6, 12, 0.55); }
 .panecard { background: #1F232E; border: 1px solid #3A4152; border-radius: 16px; overflow: hidden; }
+popover listview > row { color: #EDEDED; }
+popover listview > row label { color: #EDEDED; }
+popover listview > row:selected { background: rgba(76, 141, 255, 0.30); color: #FFFFFF; }
+popover listview > row:selected label { color: #FFFFFF; }
+popover listbox > row { color: #EDEDED; }
+popover listbox > row label { color: #EDEDED; }
+popover listbox > row:selected { background: rgba(76, 141, 255, 0.30); color: #FFFFFF; }
+popover listbox > row:selected label { color: #FFFFFF; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #9A9A9A; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #232323; padding: 8px 10px; }
@@ -625,6 +633,14 @@ button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; borde
 button.starbtn.on { color: #D97706; }
 .panebackdrop { background: rgba(15, 20, 35, 0.45); }
 .panecard { background: #FFFFFF; border: 1px solid #D8DEE9; border-radius: 16px; overflow: hidden; }
+popover listview > row { color: #171717; }
+popover listview > row label { color: #171717; }
+popover listview > row:selected { background: rgba(37, 99, 235, 0.14); color: #171717; }
+popover listview > row:selected label { color: #171717; }
+popover listbox > row { color: #171717; }
+popover listbox > row label { color: #171717; }
+popover listbox > row:selected { background: rgba(37, 99, 235, 0.14); color: #171717; }
+popover listbox > row:selected label { color: #171717; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #59636E; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #E7E7E3; padding: 8px 10px; }
