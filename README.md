@@ -4,7 +4,7 @@ Bảng cột nhắc việc chạy **ngay trên máy của bạn**: dữ liệu l
 không tài khoản, không đám mây. Dữ liệu của bạn không bao giờ rời máy — app chỉ
 tự kiểm tra bản mới trên GitHub mỗi ngày một lần (không gửi kèm dữ liệu cá nhân nào).
 
-![Phiên bản](https://img.shields.io/badge/version-1.4.1-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
+![Phiên bản](https://img.shields.io/badge/version-1.5.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
 
 ## Cài đặt
 
@@ -19,10 +19,12 @@ Cần Python 3 + GTK4 + Libadwaita (PyGObject). Chạy engine `python3 server.py
 (nên đặt làm systemd user service) và app desktop `python3 app.py`.
 
 ## Chức năng chính
-- **Nhiều dự án**: mỗi dự án có bộ cột Kanban riêng; thanh bên gọn theo mẫu Todoist (cột của dự án nằm ngay dưới tên dự án), chuyển dự án ngay trên thanh công cụ.
-- **Bảng cột tuỳ biến**: tự thêm/đổi tên/đổi màu cột, kéo-thả việc giữa các cột, kéo vào cột Đã xong để hoàn thành.
+- **Giao diện theo khung chuẩn của các app lớn** (Todoist/Linear/Asana): thanh bên chỉ để điều hướng (Thêm việc · Tìm kiếm · mục thông minh · Đã ghim · Dự án), chuyển Bảng / Danh sách / Lịch / Hôm nay / Thống kê bằng tab, thanh trên chỉ có đúng một nút **＋ Việc mới**.
+- **Panel chi tiết bên phải**: bấm vào một việc là mở panel ngay bên phải — mọi trường (hạn, ưu tiên, cột, lặp, việc con, file, bình luận, bấm giờ) sửa tại chỗ và **tự lưu ngay**, không còn hộp thoại bật giữa màn hình. Ghim việc quan trọng lên mục **Đã ghim** ở thanh bên bằng nút 📌.
+- **Nhiều dự án**: mỗi dự án có bộ cột Kanban riêng; thanh bên hiện chấm màu + vòng tiến độ + số việc đang mở cho từng dự án.
+- **Bảng cột tuỳ biến**: tự thêm/đổi tên/đổi màu cột, kéo-thả việc giữa các cột; thẻ việc gọn — cờ ưu tiên, tiêu đề, một dòng thông tin (hạn tô đỏ khi quá hạn · ☑ việc con n/m · 💬 · 📎). Việc đã xong xem riêng ở mục **Đã xong** dưới thanh bên.
 - **Bình luận + tệp đính kèm** trong từng việc (file lưu trên từng máy, không đi theo khi đồng bộ); ngày bắt đầu + người được giao cho mỗi việc.
-- **4 mức ưu tiên đặt tên tuỳ ý** (mặc định: Làm ngay / Quan trọng / Gấp / Thường), nhãn #tag (có quản lý: đổi tên/gỡ nhãn hàng loạt), việc con (checklist) ngay trên thẻ.
+- **4 mức ưu tiên đặt tên tuỳ ý** (mặc định: Làm ngay / Quan trọng / Gấp / Thường), nhãn #tag (có quản lý: đổi tên/gỡ nhãn hàng loạt), việc con (checklist) trong panel chi tiết.
 - **Đồng hồ bấm giờ**: ghi thời gian làm THẬT cho từng việc, thống kê hiện riêng giờ thật vs ước lượng.
 - **Thùng rác**: xoá việc là vào thùng rác 30 ngày, khôi phục được — không còn xoá là mất luôn.
 - **Tìm mọi nơi** (Enter trong ô tìm): mọi dự án, cả việc đã xong, khớp cả trong bình luận.

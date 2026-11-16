@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.4.1"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
+VERSION = "1.5.0"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
 TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
@@ -179,6 +179,11 @@ def init_db():
             c.execute("ALTER TABLE tasks ADD COLUMN actual_min INTEGER DEFAULT 0")
         if "timer_start" not in cols:
             c.execute("ALTER TABLE tasks ADD COLUMN timer_start TEXT")
+        # --- THIẾT KẾ LẠI THEO KHUNG CHUẨN v1.5.0: ghim việc lên mục
+        #     ĐÃ GHIM ở thanh bên (như Favorites/Pinned của Todoist/Linear) ---
+        cols = [r[1] for r in c.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "pinned" not in cols:
+            c.execute("ALTER TABLE tasks ADD COLUMN pinned INTEGER DEFAULT 0")
 
 init_db()
 
@@ -1325,7 +1330,7 @@ class H(BaseHTTPRequestHandler):
         fields = {"title":"title","notes":"notes","due_date":"due_date","due_time":"due_time",
                   "estimate_min":"estimate_min","remind_before":"remind_before","repeat_rule":"repeat_rule","repeat_left":"repeat_left","status":"status",
                   "column_id":"column_id","project_id":"project_id","start_date":"start_date",
-                  "assignee":"assignee"}
+                  "assignee":"assignee","pinned":"pinned"}
         sets, vals = [], []
         for k, col in fields.items():
             if k in d: sets.append(f"{col}=?"); vals.append(d[k])
