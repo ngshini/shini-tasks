@@ -290,6 +290,12 @@ sống lại.
    giới hạn này được báo trước.
 4. **Given** một bản phát hành mới trên trang dự án, **When** app kiểm tra
    định kỳ, **Then** nút báo bản mới hiện trong app kèm đúng phiên bản.
+5. **Given** một máy lạ cùng mạng gọi API mà không có token, **When** nó
+   đọc hay ghi dữ liệu, **Then** engine từ chối (403); app trên cùng máy
+   vẫn dùng bình thường vì đọc token từ file dữ liệu chung.
+6. **Given** hai máy sửa cùng một việc khác nhau, **When** đồng bộ,
+   **Then** bản mới hơn thắng và hộp đồng bộ BÁO SỐ VIỆC BỊ GHI ĐÈ thay
+   vì gộp lặng lẽ.
 
 ---
 
@@ -374,6 +380,12 @@ sống lại.
   khoản; tính năng phụ thuộc mạng MUST suy giảm êm và báo rõ.
 - **FR-024**: Mọi bề mặt và chữ trong giao diện MUST đọc rõ ở cả theme
   sáng và tối theo Nguyên tắc III của constitution.
+- **FR-025**: Mọi yêu cầu API (đọc và ghi) MUST kèm token hợp lệ (header
+  X-Token; riêng feed ICS chấp nhận tham số ?token= vì app lịch không
+  gửi được header). Token lấy từ biến môi trường hoặc file
+  api-token.txt trong thư mục dữ liệu do engine tự sinh (quyền 600);
+  app desktop cùng máy MUST tự đọc token đó. Đồng bộ hai máy MUST báo
+  số việc bị ghi đè do sửa khác nhau.
 
 ### Key Entities
 

@@ -6,7 +6,7 @@
 - 2 CHẾ ĐỘ SÁNG / TỐI: nút ☀/🌙 trên thanh tiêu đề, nhớ lựa chọn.
 Engine dùng chung server.py (cổng 8790): nhắc hạn, bản tin sáng, thêm nhanh mọi nơi.
 """
-import calendar, faulthandler, json, os, signal, subprocess, sys, threading, urllib.parse, urllib.request
+import calendar, faulthandler, json, os, signal, subprocess, sys, threading, urllib.error, urllib.parse, urllib.request
 from datetime import date, datetime, timedelta
 
 # Windows (bản đóng exe — hướng A, 2026-11-14): ép renderer cairo cho giống
@@ -98,6 +98,20 @@ def save_settings(s):
 SETTINGS = load_settings()
 if os.environ.get("SHINI_TASKS_THEME") in ("dark", "light"):
     SETTINGS["theme"] = os.environ["SHINI_TASKS_THEME"]
+
+def _read_api_token():
+    """Token API của engine CÙNG máy (audit 2026-11-17 mục A1): env
+    SHINI_TASKS_TOKEN ghi đè; không thì file api-token.txt trong thư mục
+    dữ liệu chung với engine (server.py tự sinh file này)."""
+    env_tok = os.environ.get("SHINI_TASKS_TOKEN", "").strip()
+    if env_tok: return env_tok
+    d = _DATA_DIR if (IS_WIN and FROZEN) else BASE_DIR
+    try:
+        return open(os.path.join(d, "api-token.txt"), encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+API_TOKEN = _read_api_token()
 
 def level_of(t):
     if t["important"] and t["urgent"]: return "L1"
@@ -811,16 +825,27 @@ textview.panenotes text { background: #FFFFFF; color: #171717; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 """
 
-def api(method, path, body=None):
+def api(method, path, body=None, _retry=True):
+    global API_TOKEN
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(API + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=4) as r:
-        return json.loads(r.read() or b"{}")
+    headers = {"Content-Type": "application/json"}
+    if API_TOKEN: headers["X-Token"] = API_TOKEN
+    req = urllib.request.Request(API + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=4) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        # 403: token có thể vừa được engine sinh mới (lần chạy đầu) hoặc
+        # vừa đổi — đọc lại file token và thử đúng MỘT lần nữa.
+        if e.code == 403 and _retry:
+            API_TOKEN = _read_api_token()
+            return api(method, path, body, _retry=False)
+        raise
 
 def api_raw(path):
     """Tải dữ liệu nhị phân (file đính kèm) — api() chỉ đọc JSON nên cần hàm riêng."""
-    req = urllib.request.Request(API + path)
+    headers = {"X-Token": API_TOKEN} if API_TOKEN else {}
+    req = urllib.request.Request(API + path, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.read()
 
@@ -2206,8 +2231,35 @@ class SettingsDialog(Gtk.Window):
         self.gem_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
         brow.append(self.gem_result)
         box.append(brow)
+        box.append(Gtk.Label(label="TOKEN API — BẢO VỆ DỮ LIỆU", xalign=0, css_classes=["pane-h"]))
+        box.append(Gtk.Label(label="Mọi yêu cầu tới engine đều phải kèm token này, nên máy lạ cùng "
+                                   "mạng không đọc hay sửa được việc của bạn. App trên máy này tự "
+                                   "dùng token, bạn chỉ cần tới nó khi: ghi việc từ điện thoại (thêm "
+                                   "header X-Token vào Shortcut) hoặc đồng bộ với máy kia (dán vào ô "
+                                   "Token trong hộp Đồng bộ ở máy kia).",
+                             xalign=0, wrap=True, css_classes=["mut"]))
+        _tok = _read_api_token()
+        krow = Gtk.Box(spacing=8)
+        krow.append(Gtk.Label(label=f"Token hiện tại: ••••{_tok[-4:]}" if _tok else "Engine chưa sinh token",
+                              css_classes=["mut"]))
+        bcopy = Gtk.Button(label="Sao chép token"); bcopy.add_css_class("dlgbtn")
+        bcopy.connect("clicked", self._copy_token)
+        krow.append(bcopy)
+        self.tok_result = Gtk.Label(label="", xalign=0, css_classes=["mut"])
+        krow.append(self.tok_result)
+        box.append(krow)
         self.set_child(box)
         self._load_tg()
+
+    def _copy_token(self, *_):
+        tok = _read_api_token()
+        if not tok:
+            self.tok_result.set_text("Chưa có token — engine chưa chạy?")
+            return
+        disp = Gdk.Display.get_default()
+        if disp is not None:
+            disp.get_clipboard().set_content(Gdk.ContentProvider.new_for_value(tok))
+        self.tok_result.set_text("Đã sao chép ✓")
 
     def _load_tg(self):
         try: cfg = api("GET", "/api/notify-config")
@@ -2652,12 +2704,15 @@ class RestoreDialog(Gtk.Window):
         except Exception as e:
             self.status.set_text(f"Khôi phục lỗi: {e}")
 
-def http_json(base, method, path, body=None, timeout=10):
+def http_json(base, method, path, body=None, timeout=10, token=""):
     """Gọi API JSON của một engine Shini Tasks BẤT KỲ (máy này hoặc máy kia qua
-    Tailscale) — dùng cho đồng bộ/xuất/nhập."""
+    Tailscale) — dùng cho đồng bộ/xuất/nhập. Máy kia có token thì phải kèm
+    X-Token của máy kia (audit 2026-11-17 mục A1)."""
     data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"}
+    if token: headers["X-Token"] = token
     req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
@@ -2698,6 +2753,14 @@ class SyncDialog(Gtk.Window):
         savep.connect("clicked", self._save_peer)
         row.append(savep)
         box.append(row)
+        trow = Gtk.Box(spacing=8)
+        trow.append(Gtk.Label(label="Token của máy kia:", css_classes=["mut"]))
+        self.ptok = Gtk.Entry(placeholder_text="Lấy ở Cài đặt của máy kia (mục Token API)…")
+        self.ptok.set_visibility(False)
+        self.ptok.set_text(SETTINGS.get("peer_token", ""))
+        self.ptok.set_hexpand(True)
+        trow.append(self.ptok)
+        box.append(trow)
         brow = Gtk.Box(spacing=8)
         self.btn_sync = Gtk.Button(label="⇄ Đồng bộ 2 chiều"); self.btn_sync.add_css_class("suggested-action")
         self.btn_sync.connect("clicked", self._sync)
@@ -2722,8 +2785,9 @@ class SyncDialog(Gtk.Window):
 
     def _save_peer(self, *_):
         SETTINGS["peer_url"] = self.peer.get_text().strip()
+        SETTINGS["peer_token"] = self.ptok.get_text().strip()
         save_settings(SETTINGS)
-        self.status.set_text("Đã lưu địa chỉ máy kia.")
+        self.status.set_text("Đã lưu địa chỉ + token máy kia.")
 
     def _save_name(self, *_):
         SETTINGS["display_name"] = self.dname.get_text().strip()
@@ -2735,19 +2799,24 @@ class SyncDialog(Gtk.Window):
         if not peer:
             self.status.set_text("⚠ Chưa nhập địa chỉ máy kia (dạng http://100.x.x.x:8790).")
             return
-        SETTINGS["peer_url"] = peer; save_settings(SETTINGS)
+        ptok = self.ptok.get_text().strip()
+        SETTINGS["peer_url"] = peer; SETTINGS["peer_token"] = ptok; save_settings(SETTINGS)
         self.btn_sync.set_sensitive(False)
         self.status.set_text("Đang đồng bộ…")
         def work():
             try:
                 local = api("GET", "/api/export")
-                remote = http_json(peer, "GET", "/api/export")
-                r1 = http_json(peer, "POST", "/api/import", local)
+                remote = http_json(peer, "GET", "/api/export", token=ptok)
+                r1 = http_json(peer, "POST", "/api/import", local, token=ptok)
                 r2 = api("POST", "/api/import", remote)
                 msg = (f"✓ Xong: gửi sang máy kia +{r1.get('inserted', 0)} việc mới, {r1.get('updated', 0)} cập nhật · "
                        f"nhận về +{r2.get('inserted', 0)} việc mới, {r2.get('updated', 0)} cập nhật.")
+                ovw = (r1.get("overwritten", 0) or 0) + (r2.get("overwritten", 0) or 0)
+                if ovw:
+                    msg += (f"\n⚠ Có {ovw} việc bị GHI ĐÈ vì hai máy sửa khác nhau (bản mới hơn thắng) — "
+                            "kiểm tra lại các việc vừa sửa gần đây ở cả hai máy.")
             except Exception as e:
-                msg = f"⚠ Không đồng bộ được: {e} — kiểm tra máy kia có đang chạy Shini Tasks và cùng mạng Tailscale không."
+                msg = f"⚠ Không đồng bộ được: {e} — kiểm tra máy kia có đang chạy Shini Tasks, cùng mạng Tailscale, và token máy kia đã đúng chưa."
             GLib.idle_add(self._sync_done, msg)
         threading.Thread(target=work, daemon=True).start()
 
@@ -3010,8 +3079,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.upd_btn.set_visible(False)
         self.upd_btn.set_tooltip_text("Có bản Shini Tasks mới — bấm để mở trang tải về")
         self.upd_btn.connect("clicked", self._open_update)
+        # Nhãn báo mất kết nối engine (audit A7): chỉ hiện khi refresh lỗi.
+        self.conn_lbl = Gtk.Label(label="⚠ Mất kết nối engine — đang tự nối lại…")
+        self.conn_lbl.add_css_class("overdue"); self.conn_lbl.set_visible(False)
         hb.pack_start(b_side); hb.pack_start(self.theme_btn)
-        hb.pack_end(b_new); hb.pack_end(b_cap); hb.pack_end(self.upd_btn)
+        hb.pack_end(b_new); hb.pack_end(b_cap); hb.pack_end(self.upd_btn); hb.pack_end(self.conn_lbl)
         root.append(hb)
 
         body = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
@@ -3743,8 +3815,23 @@ class MainWindow(Adw.ApplicationWindow):
             stats = api("GET", "/api/stats")
             columns = api("GET", "/api/columns")["columns"]
         except Exception:
+            # Engine mất kết nối (audit 2026-11-17 mục A7): hiện nhãn báo
+            # trên headerbar và thử tự khởi động lại dịch vụ MỘT lần cho
+            # mỗi đợt mất (Linux/systemd — máy của người dùng có unit
+            # shini-tasks); các tick sau chỉ chờ, không spam lệnh.
+            self._eng_fails = getattr(self, "_eng_fails", 0) + 1
+            if getattr(self, "conn_lbl", None) is not None:
+                self.conn_lbl.set_visible(True)
+            if self._eng_fails == 2 and not IS_WIN:
+                try:
+                    subprocess.run(["systemctl", "--user", "start", "shini-tasks"],
+                                   capture_output=True, timeout=10)
+                except Exception: pass
             if not maybe: self._render_error()
             return
+        self._eng_fails = 0
+        if getattr(self, "conn_lbl", None) is not None:
+            self.conn_lbl.set_visible(False)
         self.all_tasks = open_ + done
         # Việc đang mở ở panel mà bị xoá nơi khác (thùng rác) -> đóng panel
         if getattr(self, "pane", None) is not None and self.pane.task and \

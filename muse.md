@@ -316,3 +316,26 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   ngược vào spec 001 (FR-019 + Story 7 kịch bản 3). Kiểm chứng: render
   Tháng theme tối (thanh/đường hôm nay/nhãn ngày đúng dữ liệu thật) +
   render Tuần theme sáng không đổi.
+- 2026-11-17 (gói vá A theo audit): vá toàn bộ mục A của AUDIT-2026-11-17
+  (file audit để ở gốc repo, không commit). (1) **Token API**: engine tự
+  sinh `api-token.txt` trong thư mục dữ liệu (quyền 600, env
+  SHINI_TASKS_TOKEN ghi đè); `_auth()` nay chặn CẢ do_GET (trước chỉ
+  chặn ghi) — feed ICS là ngoại lệ duy nhất, chấp nhận `?token=` trên
+  URL. App đọc token cùng file, gặp 403 thì đọc lại file và thử lại 1
+  lần. Cài đặt có mục TOKEN API (hiện 4 số cuối + nút sao chép); hộp
+  Đồng bộ có ô "Token của máy kia" (lưu `peer_token`); hướng dẫn điện
+  thoại đã bổ sung header X-Token + ?token= cho ICS. **Mọi script test
+  từ nay phải gửi header X-Token đọc từ `<data dir>/api-token.txt`.**
+  (2) SQLite bật **WAL + busy_timeout=5000** trong `db()`. (3) `_body()`
+  bắt lỗi JSON + trần 40MB, body rác trả {} thay vì sập handler.
+  (4) reminder_loop thu hẹp: chỉ quét việc còn điều kiện nhắc, hạn ≤ 8
+  ngày tới, đọc xong đóng transaction, cập nhật cờ bằng transaction
+  ngắn; thêm index idx_tasks_due. (5) `/api/import` trả thêm
+  `overwritten` (số việc bị ghi đè khi nội dung thật sự khác); hộp Đồng
+  bộ hiển thị cảnh báo. (6) Bấm giờ dùng `_elapsed_mins()` làm tròn nửa
+  phút trở lên (phiên 40 giây = 1 phút; trước đây tròn xuống = 0).
+  (7) App mất kết nối engine: hiện nhãn ⚠ trên headerbar + tự
+  `systemctl --user start shini-tasks` một lần mỗi đợt mất (Linux).
+  Test `test_fix_a.py` 12/12 trên bản sao (không commit). Kiểm chứng
+  live: không token → 403, có token → 200, app nạp đủ dữ liệu thật.
+  Chưa release — chờ lệnh của Sinh (quy tắc phát hành 2026-11-17).

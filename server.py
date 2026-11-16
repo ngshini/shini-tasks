@@ -5,7 +5,7 @@ Chạy thẳng trên máy Linux, không cần thư viện ngoài (chỉ Python c
 - API thêm nhanh: POST /api/quick  {"text": "Mai 9h họp team !gấp #work 30p"}
 - Nhắc việc:  notify-send trên desktop GNOME + thông báo trong web.
 """
-import json, os, re, sqlite3, subprocess, sys, threading, time, urllib.request
+import json, os, re, secrets, sqlite3, subprocess, sys, threading, time, urllib.request
 from contextlib import contextmanager
 from datetime import datetime, date, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs
 VERSION = "1.6.4"   # khớp với bản phát hành trên GitHub (app.py + .iss + README)
 BASE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("SHINI_TASKS_PORT", "8790"))
-TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # để trống = chỉ tin mạng nhà/Tailscale
+TOKEN = os.environ.get("SHINI_TASKS_TOKEN", "")  # env ghi đè; rỗng -> file api-token.txt (xem _resolve_token)
 
 # ---- Tương thích Windows (bản đóng exe, hướng A — Sinh chọn 2026-11-14) ----
 # Mọi rẽ nhánh Windows đều nằm sau IS_WIN/FROZEN nên bản Linux chạy y như cũ.
@@ -33,6 +33,32 @@ def _data_dir():
 
 DATA = _data_dir()
 DB = os.path.join(DATA, "tasks.db")
+
+def _resolve_token():
+    """Token bảo vệ API (audit 2026-11-17 mục A1): ưu tiên env
+    SHINI_TASKS_TOKEN; không có thì đọc file api-token.txt trong thư mục
+    dữ liệu — chưa có thì TỰ SINH và ghi lại (quyền 600). App desktop
+    cùng máy đọc cùng file này nên mọi luồng nội bộ vẫn chạy không cần
+    cấu hình tay; máy khác muốn gọi API phải có token."""
+    if TOKEN:
+        return TOKEN
+    path = os.path.join(DATA, "api-token.txt")
+    try:
+        tok = open(path, encoding="utf-8").read().strip()
+        if tok:
+            return tok
+    except Exception:
+        pass
+    tok = secrets.token_hex(16)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(tok)
+        os.chmod(path, 0o600)
+    except Exception as e:
+        print("khong ghi duoc api-token.txt:", e, flush=True)
+    return tok
+
+TOKEN = _resolve_token()
 
 if IS_WIN:
     # Console Windows mặc định cp1252: print() tiếng Việt (kể cả dòng mở đầu)
@@ -69,8 +95,14 @@ def win_toast(title, body):
 def db():
     # BẮT BUỘC đóng kết nối: `with sqlite3.connect()` chỉ commit chứ KHÔNG close —
     # bản cũ rò 1020 file descriptor tới tasks.db sau ~1 giờ (Errno 24, sập API).
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(DB, timeout=10)
     c.row_factory = sqlite3.Row
+    # WAL + busy_timeout (audit 2026-11-17 mục A2): trước đây không một
+    # PRAGMA nào — ghi đồng thời (app poll, vòng nhắc, điện thoại, sync)
+    # có thể văng 'database is locked'. WAL cho đọc/ghi song song,
+    # busy_timeout cho phép chờ khoá tối đa 5 giây thay vì lỗi ngay.
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=5000")
     try:
         yield c
         c.commit()
@@ -95,6 +127,7 @@ def init_db():
             notified INTEGER DEFAULT 0,
             created_at TEXT, done_at TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)")
         # --- Cột công việc TUỲ CHỈNH (Sinh tự thêm/đổi tên/xoá từ app) ---
         c.execute("""CREATE TABLE IF NOT EXISTS columns(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -522,6 +555,16 @@ LEVEL_NAMES = {(1, 1): "Làm ngay", (1, 0): "Quan trọng", (0, 1): "Gấp", (0,
 def level_name(t):
     return LEVEL_NAMES[(1 if t["important"] else 0, 1 if t["urgent"] else 0)]
 
+def _elapsed_mins(start_iso):
+    """Phút làm thật từ mốc timer_start, làm tròn NỬA PHÚT TRỞ LÊN
+    (audit 2026-11-17 mục A6): trước đây luôn làm tròn xuống nên phiên
+    làm 40 giây ghi 0 phút, trông như bấm giờ hỏng."""
+    try:
+        secs = (datetime.now() - datetime.fromisoformat(start_iso)).total_seconds()
+    except Exception:
+        return 0
+    return max(0, int((secs + 30) // 60))
+
 def _fmt_when(due, now):
     mins = int((due - now).total_seconds() // 60)
     if mins < 0: return f"đã quá hạn {abs(mins)} phút"
@@ -653,29 +696,42 @@ def reminder_loop():
     while True:
         try:
             now = datetime.now()
+            # Thu hẹp vòng quét (audit 2026-11-17 mục A4): chỉ việc còn
+            # điều kiện nhắc (chưa nhắc HOẶC chưa leo thang) và hạn trong
+            # cửa sổ 2 ngày tới trở về trước; đọc xong ĐÓNG transaction
+            # ngay, cập nhật cờ bằng transaction ngắn riêng cho từng việc
+            # — không giữ khoá ghi trong lúc gửi thông báo nữa.
+            horizon = (now + timedelta(days=8)).strftime("%Y-%m-%d")
             with db() as c:
-                rows = c.execute("SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL AND due_date IS NOT NULL").fetchall()
-                for r in rows:
-                    # Đang hoãn nhắc (nút 'Nhắc lại sau 15 phút' trên thông báo) thì bỏ qua
-                    sz = c.execute("SELECT v FROM meta WHERE k=?", (f"snooze_{r['id']}",)).fetchone()
-                    if sz and sz["v"] > now.isoformat(timespec="seconds"): continue
-                    due = datetime.fromisoformat(r["due_date"] + "T" + (r["due_time"] or "09:00"))
-                    # 1) nhắc trước hạn — nội dung có ngữ cảnh: còn bao lâu, ước lượng, mức ưu tiên
-                    if not r["notified"]:
-                        remind_at = due - timedelta(minutes=r["remind_before"] or 30)
-                        if remind_at <= now <= due + timedelta(hours=2):
-                            ctx = [f"🕐 {due.strftime('%H:%M')} · {_fmt_when(due, now)}"]
-                            if r["estimate_min"]: ctx.append(f"~{r['estimate_min']} phút")
-                            ctx.append("mức " + level_name(r))
-                            notify_task_actions(("⏰ Sắp đến hạn — ĐÃ QUÁ HẠN" if now > due else "⏰ Sắp đến giờ"),
-                                   r["title"] + "\n" + " · ".join(ctx), r["id"],
-                                   "critical" if r["important"] and r["urgent"] else "normal")
+                rows = [dict(r) for r in c.execute(
+                    "SELECT * FROM tasks WHERE status!='done' AND deleted_at IS NULL "
+                    "AND due_date IS NOT NULL AND due_date<=? AND (notified=0 OR escalated=0)",
+                    (horizon,)).fetchall()]
+                snoozes = {k: v for k, v in c.execute(
+                    "SELECT k, v FROM meta WHERE k LIKE 'snooze_%'").fetchall()}
+            for r in rows:
+                # Đang hoãn nhắc (nút 'Nhắc lại sau 15 phút' trên thông báo) thì bỏ qua
+                sz = snoozes.get(f"snooze_{r['id']}")
+                if sz and sz > now.isoformat(timespec="seconds"): continue
+                due = datetime.fromisoformat(r["due_date"] + "T" + (r["due_time"] or "09:00"))
+                # 1) nhắc trước hạn — nội dung có ngữ cảnh: còn bao lâu, ước lượng, mức ưu tiên
+                if not r["notified"]:
+                    remind_at = due - timedelta(minutes=r["remind_before"] or 30)
+                    if remind_at <= now <= due + timedelta(hours=2):
+                        ctx = [f"🕐 {due.strftime('%H:%M')} · {_fmt_when(due, now)}"]
+                        if r["estimate_min"]: ctx.append(f"~{r['estimate_min']} phút")
+                        ctx.append("mức " + level_name(r))
+                        notify_task_actions(("⏰ Sắp đến hạn — ĐÃ QUÁ HẠN" if now > due else "⏰ Sắp đến giờ"),
+                               r["title"] + "\n" + " · ".join(ctx), r["id"],
+                               "critical" if r["important"] and r["urgent"] else "normal")
+                        with db() as c:
                             c.execute("UPDATE tasks SET notified=1 WHERE id=?", (r["id"],))
-                    # 2) leo thang: quá hạn quá 30 phút mà chưa xong -> nhắc mạnh 1 lần
-                    if not r["escalated"] and now > due + timedelta(minutes=30):
-                        notify_task_actions("⚠️ QUÁ HẠN — việc này vẫn chưa xong",
-                               f"{r['title']}\n{_fmt_when(due, now)} · mức {level_name(r)}",
-                               r["id"], "critical")
+                # 2) leo thang: quá hạn quá 30 phút mà chưa xong -> nhắc mạnh 1 lần
+                if not r["escalated"] and now > due + timedelta(minutes=30):
+                    notify_task_actions("⚠️ QUÁ HẠN — việc này vẫn chưa xong",
+                           f"{r['title']}\n{_fmt_when(due, now)} · mức {level_name(r)}",
+                           r["id"], "critical")
+                    with db() as c:
                         c.execute("UPDATE tasks SET escalated=1 WHERE id=?", (r["id"],))
             if now.time() >= dtime(7, 30): morning_briefing(now)
             if now.time() >= dtime(20, 30): evening_preview(now)
@@ -833,8 +889,23 @@ class H(BaseHTTPRequestHandler):
     def _auth(self):
         return not TOKEN or self.headers.get("X-Token") == TOKEN
     def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(n) or b"{}")
+        # Cứng hoá (audit 2026-11-17 mục A3): body không phải JSON / quá
+        # lớn thì trả {} để handler báo lỗi nghiệp vụ thay vì văng kết
+        # nối. Trần ~40MB vì file đính kèm 25MB -> base64 ~34MB.
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            n = 0
+        if n > 40_000_000:
+            print("body qua lon, bo qua:", n, flush=True)
+            return {}
+        raw = self.rfile.read(n) if n else b"{}"
+        try:
+            d = json.loads(raw or b"{}")
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            print("body khong phai JSON hop le", flush=True)
+            return {}
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/" or u.path == "/index.html":
@@ -844,6 +915,16 @@ class H(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
             return
+        # Cổng token cho MỌI route đọc (audit 2026-11-17 mục A1): trước
+        # đây _auth() chỉ chặn ghi, GET đọc tự do. Ngoại lệ duy nhất:
+        # feed ICS cho app lịch (không gửi được header) — chấp nhận
+        # ?token= trên URL của riêng route đó.
+        if u.path == "/api/calendar.ics":
+            qtok = (parse_qs(u.query).get("token") or [""])[0]
+            if TOKEN and qtok != TOKEN and not self._auth():
+                return self._json({"error": "sai token"}, 403)
+        elif not self._auth():
+            return self._json({"error": "sai token"}, 403)
         if u.path == "/api/tasks":
             q = parse_qs(u.query); view = q.get("view", ["today"])[0]
             today = date.today(); now = datetime.now()
@@ -1156,11 +1237,8 @@ class H(BaseHTTPRequestHandler):
                     # Đồng hồ đang chạy thì DỪNG và cộng phút làm thật trước
                     extra = {}
                     if old["timer_start"]:
-                        try:
-                            mins = int((datetime.now() - datetime.fromisoformat(old["timer_start"])).total_seconds() // 60)
-                        except Exception:
-                            mins = 0
-                        extra = {"actual_min": (old["actual_min"] or 0) + max(0, mins), "timer_start": None}
+                        extra = {"actual_min": (old["actual_min"] or 0) + _elapsed_mins(old["timer_start"]),
+                                 "timer_start": None}
                     c.execute("UPDATE tasks SET status='done', done_at=?, updated_at=? WHERE id=?",
                               (datetime.now().isoformat(timespec="seconds"),
                                datetime.now().isoformat(timespec="seconds"), tid))
@@ -1200,10 +1278,9 @@ class H(BaseHTTPRequestHandler):
                     elif mode == "stop":
                         if not old["timer_start"]:
                             return self._json({"error": "đồng hồ chưa chạy"}, 400)
-                        mins = int((datetime.now() - datetime.fromisoformat(
-                            old["timer_start"])).total_seconds() // 60)
+                        mins = _elapsed_mins(old["timer_start"])
                         c.execute("UPDATE tasks SET timer_start=NULL, actual_min=?, updated_at=? WHERE id=?",
-                                  ((old["actual_min"] or 0) + max(0, mins), now_s, tid))
+                                  ((old["actual_min"] or 0) + mins, now_s, tid))
                     else:
                         return self._json({"error": "action phải là start|stop"}, 400)
                     r = c.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
@@ -1281,7 +1358,7 @@ class H(BaseHTTPRequestHandler):
             # Gộp dữ liệu từ máy khác: khớp theo id, bản updated_at MỚI HƠN thì thắng.
             # (Việc đã XOÁ hẳn ở máy kia không tự xoá ở máy này — giới hạn đã biết.)
             d = self._body()
-            ins = upd = skip = 0
+            ins = upd = skip = ovw = 0
             with db() as c:
                 # Việc đã TỰ XOÁ sau 15 ngày (có trong done_archive) không được
                 # hồi sinh qua đồng bộ/khôi phục từ máy khác
@@ -1307,7 +1384,7 @@ class H(BaseHTTPRequestHandler):
                 for t in d.get("tasks") or []:
                     if t.get("status") == "done" and t.get("id") in arch_ids:
                         skip += 1; continue
-                    cur = c.execute("SELECT updated_at FROM tasks WHERE id=?", (t["id"],)).fetchone()
+                    cur = c.execute("SELECT * FROM tasks WHERE id=?", (t["id"],)).fetchone()
                     subs = t.get("subtasks") or []
                     if not isinstance(subs, str): subs = json.dumps(subs, ensure_ascii=False)
                     vals = (t.get("title", ""), t.get("notes", ""), t.get("due_date"), t.get("due_time"),
@@ -1325,6 +1402,15 @@ class H(BaseHTTPRequestHandler):
                             (t["id"],) + vals)
                         ins += 1
                     elif (t.get("updated_at") or "") > (cur["updated_at"] or ""):
+                        # Đếm riêng số việc bị GHI ĐÈ khi nội dung thật sự
+                        # khác (audit 2026-11-17 mục A5): trước đây gộp
+                        # thắng/thua theo updated_at diễn ra lặng lẽ,
+                        # người dùng không hề biết mình vừa mất bản sửa.
+                        if ((cur["title"] or "") != (t.get("title") or "")
+                                or (cur["status"] or "") != (t.get("status") or "")
+                                or (cur["due_date"] or "") != (t.get("due_date") or "")
+                                or (cur["notes"] or "") != (t.get("notes") or "")):
+                            ovw += 1
                         c.execute("""UPDATE tasks SET title=?,notes=?,due_date=?,due_time=?,important=?,urgent=?,
                             tags=?,estimate_min=?,remind_before=?,repeat_rule=?,status=?,source=?,created_at=?,
                             done_at=?,column_id=?,subtasks=?,updated_at=?,repeat_left=?,project_id=?,
@@ -1339,7 +1425,8 @@ class H(BaseHTTPRequestHandler):
                         c.execute("INSERT INTO comments(id, task_id, author, content, created_at) VALUES(?,?,?,?,?)",
                                   (cm["id"], cm["task_id"], cm.get("author", ""), cm.get("content", ""),
                                    cm.get("created_at")))
-            return self._json({"ok": True, "inserted": ins, "updated": upd, "skipped": skip})
+            return self._json({"ok": True, "inserted": ins, "updated": upd, "skipped": skip,
+                               "overwritten": ovw})
         if u.path == "/api/notify-test":
             notify("🔔 Shini Tasks", "Thông báo thử — kênh nhắc việc đang hoạt động tốt.")
             return self._json({"ok": True})

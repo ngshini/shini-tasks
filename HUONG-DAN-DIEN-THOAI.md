@@ -13,6 +13,9 @@ Mở app **Phím tắt (Shortcuts)** → dấu **+** → đặt tên "Thêm vi�
    - URL: `http://<IP-TAILSCALE-CUA-MAY-BAN>:8790/api/quick`
    - Bấm "Hiển thị thêm": Phương thức = **POST**, Kiểu nội dung = **JSON**
    - Thêm 2 trường: `text` = biến **Đầu vào đã cung cấp** (kết quả của bước 1), `source` = `ios-shortcut`
+   - **Thêm tiêu đề (Header)**: khóa `X-Token`, giá trị = token API của bạn (mở app trên
+     máy tính → ⚙ Cài đặt → mục TOKEN API → "Sao chép token" rồi dán vào đây).
+     Từ bản vá bảo mật 2026-11-17, engine không nhận yêu cầu nào thiếu token này.
 3. **Hiển thị thông báo** (Show Notification): nội dung `Đã thêm việc vào Shini Tasks ✓`
 
 Xong. Thêm phím tắt ra màn hình chính hoặc gán vào nút Tác vụ (Action Button) / chạm mặt lưng.
@@ -22,7 +25,8 @@ Thử gõ: `tập thể dục mỗi T2 T4 T6 lúc 6h lặp 12 lần` — việc 
 
 ## 2) Xem việc trên lịch điện thoại (ICS, một chiều)
 
-Engine phát lịch tại: **http://<IP-TAILSCALE-CUA-MAY-BAN>:8790/api/calendar.ics**
+Engine phát lịch tại: **http://<IP-TAILSCALE-CUA-MAY-BAN>:8790/api/calendar.ics?token=<TOKEN-API-CUA-BAN>**
+(thêm `?token=` ở cuối — app lịch không gửi được header nên token đi theo URL; token lấy ở ⚙ Cài đặt như trên)
 
 - **iPhone**: Cài đặt → Lịch → Tài khoản → Thêm tài khoản → Khác → Thêm Lịch đã đăng ký → dán địa chỉ trên.
 - **Google Calendar** (trên máy tính): Cài đặt → Thêm lịch → Từ URL → dán địa chỉ trên.
