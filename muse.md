@@ -211,6 +211,22 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   Cairo (Gantt/Sơ đồ) thì `import cairo` phải ở cấp module; glyph ✓ không
   có trong font mà Cairo toy API chọn — việc con đã xong trên Sơ đồ dùng nét
   gạch ngang vẽ tay thay cho ký tự ✓.
+- **v1.6.1 (2026-11-16) — Vá theo dùng thật, 3 điểm.** (1) **Việc con trên
+  thẻ hiện TẤT CẢ và xuống dòng đầy đủ** — bỏ giới hạn 6 hàng và bỏ cắt
+  "…" (nhãn `set_wrap(True)` + WORD_CHAR). (2) **Popup chi tiết bỏ hẳn
+  Adw.Dialog**: ở theme sáng nó có KHUNG ĐEN đặc ~10px (bóng đổ Adw vẽ bằng
+  GSK cairo thành đen đặc) và đè mất chữ đầu các nhãn ("Trạng thái" →
+  "rạng thái"). Thử Gtk.Window riêng: hết khung đen nhưng "cứng" và không
+  click-ngoài-đóng được. Chốt cuối: **lớp phủ tự dựng trong cửa sổ chính**
+  (`Gtk.Overlay`: nền mờ `.panebackdrop` + thẻ bo góc 16px `.panecard`,
+  bấm vùng mờ để đóng; nhớ `set_measure_overlay(backdrop, False)` và
+  `set_vexpand(True)` cho ScrolledWindow trong thẻ, không nó co còn
+  ~100px). (3) **Đóng popup khi còn chữ chưa lưu thì HỎI**: các ô gõ chữ
+  (tiêu đề, mô tả, người làm, nhãn, ước lượng, nhắc trước) chỉ lưu khi
+  Enter/rời ô — `DetailPane._dirty_saves()` phát hiện, mọi đường đóng
+  (✕ / Esc / click ra ngoài) đi qua `MainWindow.request_close_pane()` →
+  hộp hỏi Lưu và đóng / Bỏ thay đổi / Ở lại. Các trường chọn-bấm lưu ngay
+  nên không hỏi.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 

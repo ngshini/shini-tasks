@@ -4,7 +4,7 @@ Bảng cột nhắc việc chạy **ngay trên máy của bạn**: dữ liệu l
 không tài khoản, không đám mây. Dữ liệu của bạn không bao giờ rời máy — app chỉ
 tự kiểm tra bản mới trên GitHub mỗi ngày một lần (không gửi kèm dữ liệu cá nhân nào).
 
-![Phiên bản](https://img.shields.io/badge/version-1.6.0-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
+![Phiên bản](https://img.shields.io/badge/version-1.6.1-blue) ![Windows](https://img.shields.io/badge/Windows-Setup.exe-green) ![Linux](https://img.shields.io/badge/Linux-chạy%20từ%20source-orange)
 
 ## Cài đặt
 

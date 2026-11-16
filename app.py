@@ -57,7 +57,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.6.0"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.6.1"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -164,6 +164,8 @@ button.subchk.on { background: #34D399; border-color: #34D399; }
 .subtask { color: #D6D6D6; font-size: 13px; }
 button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; border: none; box-shadow: none; color: #6E7B8F; }
 button.starbtn.on { color: #FBBF24; }
+.panebackdrop { background: rgba(4, 6, 12, 0.55); }
+.panecard { background: #1F232E; border: 1px solid #3A4152; border-radius: 16px; overflow: hidden; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #9A9A9A; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #232323; padding: 8px 10px; }
@@ -621,6 +623,8 @@ button.subchk.on { background: #059669; border-color: #059669; }
 .subtask { color: #333333; font-size: 13px; }
 button.starbtn { font-size: 17px; padding: 0 3px; background: transparent; border: none; box-shadow: none; color: #B6BEC9; }
 button.starbtn.on { color: #D97706; }
+.panebackdrop { background: rgba(15, 20, 35, 0.45); }
+.panecard { background: #FFFFFF; border: 1px solid #D8DEE9; border-radius: 16px; overflow: hidden; }
 .subtask-done { color: #8A8A8A; font-size: 13px; }
 .empty { color: #59636E; font-size: 12.5px; padding: 18px 6px; }
 .coladd { border-top: 1px solid #E7E7E3; padding: 8px 10px; }
@@ -1218,6 +1222,48 @@ class DetailPane:
             self.e_title.grab_focus()
             self.e_title.select_region(0, -1)
 
+    # ---------- Chữ chưa lưu (gõ dở trong các ô nhập) ----------
+    def _num_dirty(self, entry, cur):
+        txt = entry.get_text().strip()
+        try: v = int(txt) if txt else None
+        except Exception: return True
+        return v != (cur or None)
+
+    def _dirty_saves(self):
+        """Tên các hàm _save_* cần gọi để lưu nốt chữ đang gõ dở. Các trường
+        chọn-bấm (dropdown, ngày, sao, duyệt, việc con…) lưu NGAY khi đổi nên
+        không nằm ở đây — chỉ các ô GÕ CHỮ mới lưu trễ (Enter / rời ô)."""
+        if not self.task: return []
+        t = self.task; out = []
+        if getattr(self, "e_title", None) is not None \
+                and self.e_title.get_text().strip() != (t.get("title") or ""):
+            out.append("_save_title")
+        if getattr(self, "tv_notes", None) is not None:
+            buf = self.tv_notes.get_buffer()
+            if buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False) != (t.get("notes") or ""):
+                out.append("_save_notes")
+        if getattr(self, "e_assignee", None) is not None \
+                and self.e_assignee.get_text().strip() != (t.get("assignee") or ""):
+            out.append("_save_assignee")
+        if getattr(self, "e_tags", None) is not None \
+                and self.e_tags.get_text().strip() != ", ".join(t.get("tags") or []):
+            out.append("_save_tags")
+        if getattr(self, "e_est", None) is not None \
+                and self._num_dirty(self.e_est, t.get("estimate_min")):
+            out.append("_save_est")
+        if getattr(self, "e_rem", None) is not None \
+                and self._num_dirty(self.e_rem, t.get("remind_before")):
+            out.append("_save_rem")
+        return out
+
+    def _pending_dirty(self):
+        return bool(self._dirty_saves())
+
+    def _flush_pending(self):
+        for name in self._dirty_saves():
+            try: getattr(self, name)()
+            except Exception: pass
+
     # ---------- Lưu từng trường ----------
     def _patch(self, body, rebuild=False):
         if not self.task: return
@@ -1282,7 +1328,7 @@ class DetailPane:
         hdr.append(pin)
         xb = Gtk.Button(label="✕"); xb.add_css_class("dlgbtn"); xb.add_css_class("mini")
         xb.set_tooltip_text("Đóng panel (Esc)")
-        xb.connect("clicked", lambda *_: win.close_pane())
+        xb.connect("clicked", lambda *_: win.request_close_pane())
         hdr.append(xb)
         self.box.append(hdr)
         # --- Hàng xong / menu phụ ---
@@ -3164,12 +3210,30 @@ class MainWindow(Adw.ApplicationWindow):
         self.pane_scroll.set_child(self.pane.box)
         # Chi tiết việc = POPUP nổi giữa cửa sổ (Adw.Dialog) — Sinh chốt
         # 2026-11-16: panel phải cố định bóp bảng quá hẹp, cứ popup như cũ.
-        self.pane_dialog = Adw.Dialog()
-        self.pane_dialog.set_content_width(560)
-        self.pane_dialog.set_content_height(840)
-        self.pane_dialog.set_child(self.pane_scroll)
+        # Popup chi tiết = LỚP PHỦ MỀM trong cửa sổ chính (Sinh 2026-11-16
+        # 17:16: 'hiển thị mềm mại hơn, có thể click nơi khác để đóng'):
+        # nền mờ phủ toàn cửa sổ + thẻ bo góc 16px nổi ở giữa; bấm vào vùng
+        # mờ là đóng (qua request_close_pane — còn chữ chưa lưu thì hỏi).
+        # Adw.Dialog hỏng vì bóng đổ cairo thành khung đen đè chữ; Gtk.Window
+        # riêng thì cứng và không click-ngoài-đóng được — lớp phủ thắng cả hai.
+        self.pane_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pane_card.add_css_class("panecard")
+        self.pane_card.set_halign(Gtk.Align.CENTER)
+        self.pane_card.set_valign(Gtk.Align.CENTER)
+        # Trong Gtk.Box, ScrolledWindow không tự giãn — phải ghim expand,
+        # không thì nó co về chiều cao tự nhiên ~100px và thẻ trắng trơn.
+        self.pane_scroll.set_vexpand(True)
+        self.pane_scroll.set_hexpand(True)
+        self.pane_card.append(self.pane_scroll)
+        self.pane_backdrop = Gtk.Overlay()
+        _dim = Gtk.Box(); _dim.add_css_class("panebackdrop")
+        self.pane_backdrop.set_child(_dim)
+        self.pane_backdrop.add_overlay(self.pane_card)
+        _bg = Gtk.GestureClick()
+        _bg.connect("released", lambda *_: self.request_close_pane())
+        _dim.add_controller(_bg)
+        self.pane_backdrop.set_visible(False)
         self._pane_shown = False
-        self.pane_dialog.connect("closed", self._on_pane_closed)
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         body.set_hexpand(True)
         outer.append(body)
@@ -3177,7 +3241,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.toasts = Adw.ToastOverlay()
         self.toasts.set_child(root)
-        self.set_content(self.toasts)
+        self.win_overlay = Gtk.Overlay()
+        self.win_overlay.set_child(self.toasts)
+        self.win_overlay.add_overlay(self.pane_backdrop)
+        # Lớp phủ KHÔNG được tính vào kích thước tối thiểu của cửa sổ
+        self.win_overlay.set_measure_overlay(self.pane_backdrop, False)
+        self.set_content(self.win_overlay)
         keyctl = Gtk.EventControllerKey()
         keyctl.connect("key-pressed", self._on_key)
         self.add_controller(keyctl)
@@ -3591,7 +3660,7 @@ class MainWindow(Adw.ApplicationWindow):
         name = Gdk.keyval_name(keyval) or ""
         if not ctrl:
             if name == "Escape" and getattr(self, "pane", None) and self.pane.task:
-                self.close_pane(); return True
+                self.request_close_pane(); return True
             return False
         if name in ("n", "N"):
             self.new_task(); return True
@@ -4320,11 +4389,43 @@ class MainWindow(Adw.ApplicationWindow):
     def _show_pane(self):
         if not self._pane_shown:
             self._pane_shown = True
-            self.pane_dialog.present(self)
+            w = max(360, min(560, self.get_width() - 40))
+            h = max(420, min(840, self.get_height() - 56))
+            self.pane_card.set_size_request(w, h)
+            self.pane_backdrop.set_visible(True)
 
     def _hide_pane(self):
         if self._pane_shown:
-            self.pane_dialog.close()
+            self._pane_shown = False
+            self.pane_backdrop.set_visible(False)
+            self._on_pane_closed()
+
+    def request_close_pane(self):
+        """Đóng popup chi tiết CÓ HỎI khi còn chữ chưa lưu (Sinh 2026-11-16):
+        các ô chữ trong popup chỉ lưu khi Enter / rời ô — đóng ngay lúc đang
+        gõ dở (bấm ✕, Esc, hay click ra ngoài) sẽ mất chữ, nên phải hỏi trước:
+        Lưu và đóng / Bỏ thay đổi / Ở lại."""
+        if getattr(self, "pane", None) and self.pane.task \
+                and self.pane._pending_dirty() and self._find_task(self.pane.task["id"]):
+            dlg = Gtk.AlertDialog()
+            dlg.set_message("Việc này có thay đổi chưa lưu")
+            dlg.set_detail("Bạn vừa gõ sửa trong popup mà phần đó chưa kịp lưu. "
+                           "Lưu lại rồi đóng, hay bỏ phần vừa sửa?")
+            dlg.set_buttons(["Ở lại", "Bỏ thay đổi", "Lưu và đóng"])
+            dlg.set_cancel_button(0); dlg.set_default_button(2)
+            dlg.choose(self, None, self._close_confirm_done)
+            return
+        self.close_pane()
+
+    def _close_confirm_done(self, dlg, res):
+        try: idx = dlg.choose_finish(res)
+        except Exception: return
+        if idx == 2:
+            self.pane._flush_pending()
+            self.close_pane()
+        elif idx == 1:
+            self.pane._build()
+            self.close_pane()
 
     def _on_pane_closed(self, *_):
         self._pane_shown = False
@@ -4505,7 +4606,7 @@ class MainWindow(Adw.ApplicationWindow):
         r2.append(title)
         card.append(r2)
         subs = t.get("subtasks") or []
-        for i, s in enumerate(subs[:6]):
+        for i, s in enumerate(subs):
             srow = Gtk.Box(spacing=6)
             sc = Gtk.Button(label="✓" if s.get("done") else "")
             sc.add_css_class("subchk")
@@ -4516,16 +4617,12 @@ class MainWindow(Adw.ApplicationWindow):
             srow.append(sc)
             sl = Gtk.Label(xalign=0); sl.set_hexpand(True)
             sl.add_css_class("subtask-done" if s.get("done") else "subtask")
-            sl.set_ellipsize(Pango.EllipsizeMode.END)
+            sl.set_wrap(True); sl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             txt = GLib.markup_escape_text(s.get("t") or s.get("title") or "")
             if s.get("done"): sl.set_markup(f"<s>{txt}</s>")
             else: sl.set_text(s.get("t") or s.get("title") or "")
             srow.append(sl)
             card.append(srow)
-        if len(subs) > 6:
-            more = Gtk.Label(label=f"+{len(subs) - 6} việc con nữa…", xalign=0)
-            more.add_css_class("cardmeta")
-            card.append(more)
         meta = self._card_meta_markup(t, count_subs=False)
         if meta:
             m = Gtk.Label(xalign=0); m.add_css_class("cardmeta")
