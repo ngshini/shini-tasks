@@ -258,6 +258,17 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   `[NEEDS CLARIFICATION]`; đổi yêu cầu sửa spec → plan → tasks → test →
   code. Đang dừng ở cổng duyệt specify — plan/tasks theo hướng converge
   chờ anh duyệt.
+- **v1.6.3 (2026-11-17, Sinh chê popup chi tiết "dư thừa quá nhiều"):**
+  các trường phụ của DetailPane (Bắt đầu, Lặp lại + 2 hàng con, Người
+  làm, Nhãn, Làm thật, ĐÁNH GIÁ/Chấm sao/Phê duyệt) gập vào nhóm
+  **"Chi tiết khác"** sau hàng Hạn — một nút `▸/▾` + `more_box`; nhóm TỰ
+  MỞ khi việc có giá trị ở bất kỳ trường phụ nào (start_date, repeat,
+  assignee, tags, actual_min, timer đang chạy, rating, verdict). Trường
+  lõi luôn hiện: Trạng thái/Ưu tiên/Dự án/Cột/Hạn/Ước lượng/Nhắc trước.
+  Kiểm chứng 2 render: việc "Dự định phát triển về bảo mật" (đúng ảnh anh
+  gửi) gập gọn vừa một màn hình theme sáng; việc seed đầy giá trị tự mở
+  đủ trường theme tối. Spec 001 không đổi — mọi trường vẫn ở nguyên trong
+  cùng popup, chỉ gập hiển thị.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 

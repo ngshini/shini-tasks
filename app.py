@@ -57,7 +57,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.6.2"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.6.3"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -1429,16 +1429,25 @@ class DetailPane:
             b = Gtk.Button(label=label); b.add_css_class("dlgbtn"); b.add_css_class("mini")
             b.connect("clicked", lambda *_ , f=fn: f()); qrow.append(b)
         self.box.append(qrow)
+        # --- Nhóm "Chi tiết khác": trường ít dùng / đang trống gập lại cho
+        # popup gọn (Sinh chê dư thừa 2026-11-17). Tự mở sẵn khi có giá trị.
+        self.more_btn = Gtk.Button(label="▸ Chi tiết khác — bắt đầu · lặp · người làm · nhãn · đánh giá")
+        self.more_btn.add_css_class("flat"); self.more_btn.add_css_class("dlgflat")
+        self.more_btn.set_halign(Gtk.Align.START)
+        self.more_btn.connect("clicked", self._toggle_more)
+        self.box.append(self.more_btn)
+        self.more_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.box.append(self.more_box)
         self.b_start = self._date_button("start")
         self._sync_start_btn()
-        self.box.append(self._frow("Bắt đầu", self.b_start))
+        self.more_box.append(self._frow("Bắt đầu", self.b_start))
         # --- Lặp lại ---
         self.d_repeat = Gtk.DropDown.new_from_strings(["Không lặp", "Mỗi ngày", "Mỗi tuần", "Mỗi tháng", "Theo thứ…"])
         rule0 = (t.get("repeat_rule") or "none")
         self.d_repeat.set_selected(4 if rule0.startswith("wd:") else
                                    {"none": 0, "daily": 1, "weekly": 2, "monthly": 3}.get(rule0, 0))
         self.d_repeat.connect("notify::selected", lambda *_: None if self._guard else (self._sync_repeat_ui(), self._save_repeat()))
-        self.box.append(self._frow("Lặp lại", self.d_repeat))
+        self.more_box.append(self._frow("Lặp lại", self.d_repeat))
         self.wd_row = Gtk.Box(spacing=4)
         self.wd_btns = {}
         wd_sel = {int(x) for x in rule0[3:].split(",") if x != ""} if rule0.startswith("wd:") else set()
@@ -1448,13 +1457,13 @@ class DetailPane:
             b.connect("toggled", lambda *_: None if self._guard else self._save_repeat())
             self.wd_btns[wd] = b; self.wd_row.append(b)
         self.wd_field = self._frow("Vào các thứ", self.wd_row)
-        self.box.append(self.wd_field)
+        self.more_box.append(self.wd_field)
         self.e_left = Gtk.Entry(placeholder_text="lặp mãi")
         if t.get("repeat_left") is not None: self.e_left.set_text(str(t["repeat_left"]))
         self.e_left.connect("activate", lambda *_: self._save_repeat())
         self._leave(self.e_left, self._save_repeat)
         self.left_field = self._frow("Lặp thêm (lần)", self.e_left)
-        self.box.append(self.left_field)
+        self.more_box.append(self.left_field)
         self._sync_repeat_ui()
         # --- Số phút / nhắc / người làm / nhãn ---
         self.e_est = Gtk.Entry(placeholder_text="30")
@@ -1470,12 +1479,12 @@ class DetailPane:
         if t.get("assignee"): self.e_assignee.set_text(t["assignee"])
         self.e_assignee.connect("activate", self._save_assignee)
         self._leave(self.e_assignee, self._save_assignee)
-        self.box.append(self._frow("Người làm", self.e_assignee))
+        self.more_box.append(self._frow("Người làm", self.e_assignee))
         self.e_tags = Gtk.Entry(placeholder_text="work, nhà, học…")
         self.e_tags.set_text(", ".join(t.get("tags") or []))
         self.e_tags.connect("activate", self._save_tags)
         self._leave(self.e_tags, self._save_tags)
-        self.box.append(self._frow("Nhãn", self.e_tags))
+        self.more_box.append(self._frow("Nhãn", self.e_tags))
         # --- Đồng hồ bấm giờ ---
         trow2 = Gtk.Box(spacing=8)
         self.timer_lab = Gtk.Label(label="", xalign=0, css_classes=["mut"])
@@ -1483,10 +1492,10 @@ class DetailPane:
         self.timer_btn = Gtk.Button(); self.timer_btn.add_css_class("dlgbtn")
         self.timer_btn.connect("clicked", self._toggle_timer)
         trow2.append(self.timer_btn)
-        self.box.append(self._frow("Làm thật", trow2))
+        self.more_box.append(self._frow("Làm thật", trow2))
         self._sync_timer_ui()
         # --- Đánh giá & phê duyệt (gói Coogo v1.6.0) ---
-        self.box.append(Gtk.Label(label="ĐÁNH GIÁ", xalign=0, css_classes=["pane-h"]))
+        self.more_box.append(Gtk.Label(label="ĐÁNH GIÁ", xalign=0, css_classes=["pane-h"]))
         srow = Gtk.Box(spacing=2)
         self._star_btns = []
         for i in range(1, 6):
@@ -1498,11 +1507,17 @@ class DetailPane:
             sb_.connect("clicked", lambda *_ , n=i: self._set_rating(n))
             self._star_btns.append(sb_)
             srow.append(sb_)
-        self.box.append(self._frow("Chấm sao", srow))
+        self.more_box.append(self._frow("Chấm sao", srow))
         self.d_verdict = Gtk.DropDown.new_from_strings(["Chưa duyệt", "Đã duyệt ✓", "Làm lại ↺"])
         self.d_verdict.set_selected({"": 0, "approved": 1, "redo": 2}.get(t.get("verdict") or "", 0))
         self.d_verdict.connect("notify::selected", self._on_verdict)
-        self.box.append(self._frow("Phê duyệt", self.d_verdict))
+        self.more_box.append(self._frow("Phê duyệt", self.d_verdict))
+        _has_more = bool(t.get("start_date") or (t.get("repeat_rule") or "none") != "none"
+                         or t.get("assignee") or (t.get("tags") or [])
+                         or (t.get("actual_min") or 0) > 0 or t.get("timer_start")
+                         or (t.get("rating") or 0) > 0 or (t.get("verdict") or ""))
+        self.more_box.set_visible(_has_more)
+        self._sync_more_btn()
         # --- Mô tả ---
         self.box.append(Gtk.Label(label="MÔ TẢ", xalign=0, css_classes=["pane-h"]))
         frame = Gtk.Frame()
@@ -1766,6 +1781,14 @@ class DetailPane:
             self._patch({"due_date": self._date_iso or None, "due_time": self._time_hm or None})
 
     # ---------- Lặp / số / chữ ----------
+    def _sync_more_btn(self):
+        arrow = "▾" if self.more_box.get_visible() else "▸"
+        self.more_btn.set_label(f"{arrow} Chi tiết khác — bắt đầu · lặp · người làm · nhãn · đánh giá")
+
+    def _toggle_more(self, *_):
+        self.more_box.set_visible(not self.more_box.get_visible())
+        self._sync_more_btn()
+
     def _sync_repeat_ui(self):
         sel = self.d_repeat.get_selected()
         self.wd_field.set_visible(sel == 4)
