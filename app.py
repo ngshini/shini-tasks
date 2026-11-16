@@ -57,7 +57,7 @@ def _kids(w):
         c = c.get_next_sibling()
     return out
 
-VERSION = "1.6.3"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
+VERSION = "1.6.4"   # khớp với bản phát hành trên GitHub (server.py + .iss + README)
 API = "http://127.0.0.1:8790"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = date.today().isoformat()   # ngày hôm nay dạng ISO, tính lúc mở app
@@ -3517,7 +3517,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.foot_done_num = Gtk.Label(label="0", css_classes=["smartnum"])
         fd_row.append(self.foot_done_num)
         self.foot_done.set_child(fd_row)
-        self.foot_done.set_tooltip_text("Xem mọi việc đã hoàn thành (cột ĐÃ XONG đã rời khỏi bảng)")
+        self.foot_done.set_tooltip_text("Xem mọi việc đã hoàn thành")
         self.foot_done.connect("clicked", lambda *_: self._set_smart("done"))
         foot.append(self.foot_done)
         for label, tip, fn in [
@@ -3833,6 +3833,12 @@ class MainWindow(Adw.ApplicationWindow):
                 key = ("col", col["id"])
                 wanted.append((key, self._col_sig(by[col["id"]], filtering),
                                lambda col=col: self._column_widget(col, by[col["id"]], filtering)))
+            if self.focus_col is None:
+                # Cột ĐÃ XONG đứng cuối bảng (Sinh muốn hiện lại 2026-11-17).
+                # Việc xong quá 15 ngày tự rời cột: engine dọn hằng ngày vào
+                # done_archive (vẫn tính thống kê) — xem purge_old_done.
+                wanted.append((("done",), self._col_sig(done_list, filtering),
+                               lambda: self._column_widget(None, done_list, filtering)))
             wanted.append((("__add__",), "static", self._add_tile))
         new_children = []
         for key, sig, build in wanted:

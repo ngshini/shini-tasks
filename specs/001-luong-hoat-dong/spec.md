@@ -91,6 +91,13 @@ một việc sang cột khác, lưu trữ dự án — bảng thay đổi đúng
 5. **Given** người dùng xoá cột đang có việc, **When** xác nhận, **Then**
    các việc trong cột rơi về cột đầu tiên của cùng dự án — không việc nào
    mất.
+6. **Given** bảng của một dự án đang hiện, **When** nhìn tới cuối bảng,
+   **Then** có cột ĐÃ XONG chứa các việc đã hoàn thành của dự án đó (kéo
+   thả thẻ vào cột này tương đương đánh dấu xong); việc đã xong quá 15
+   ngày tự rời khỏi cột vào kho lưu trữ thống kê — vẫn tính đủ trong
+   thống kê, chỉ không còn hiện trên bảng. Khi đang ghim xem riêng một
+   cột, cột ĐÃ XONG tạm ẩn. (Bổ sung 2026-11-17 theo yêu cầu của chủ dự
+   án, thay cho cách để ĐÃ XONG chỉ ở thanh bên của bản v1.5.0.)
 
 ---
 

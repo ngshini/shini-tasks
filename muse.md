@@ -269,6 +269,17 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   gửi) gập gọn vừa một màn hình theme sáng; việc seed đầy giá trị tự mở
   đủ trường theme tối. Spec 001 không đổi — mọi trường vẫn ở nguyên trong
   cùng popup, chỉ gập hiển thị.
+- **v1.6.4 (2026-11-17, Sinh muốn cột ĐÃ XONG hiện lại trên bảng):** đảo
+  quyết định v1.5.0 lần nữa theo dùng thật — `_sync_board` thêm cột ĐÃ
+  XONG (chính widget `_column_widget(None, done_list)` của mục ĐÃ XONG)
+  đứng cuối các cột dự án, trước ô thêm cột; đang ghim-một-cột thì ẩn.
+  Quy tắc 15 ngày KHÔNG phải làm mới: engine đã có `purge_old_done` từ
+  v1.2.0 (done_at < hôm nay − 15 ngày → chép sang done_archive rồi xoá
+  khỏi bảng tasks, chạy hằng ngày) nên việc xong quá 15 ngày tự rời cột
+  mà thống kê vẫn đủ. Sửa luôn tooltip chân thanh bên còn ghi "cột ĐÃ
+  XONG đã rời khỏi bảng". Đã ghi ngược vào spec 001 (Story 2, kịch bản
+  6). Kiểm chứng render bảng cả sáng + tối: cột ĐÃ XONG hiện đúng việc
+  đã xong của dự án.
 
 ## 7. Cách chủ dự án làm việc (để phối hợp cho đúng)
 
