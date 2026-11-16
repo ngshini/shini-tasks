@@ -107,6 +107,12 @@ GSK_RENDERER=cairo SHINI_TASKS_THEME=dark SHINI_TASKS_SNAPSHOT=/tmp/shot.png \
   có sửa gì — code, hành vi, quy định — thì cập nhật ngược vào đúng file
   md đó. Các file md là nguồn sự thật sống của dự án, không phải giấy
   viết một lần rồi bỏ.
+- **Phát hành chỉ khi Sinh kêu (chốt 2026-11-17):** sửa nhỏ thì CHỈ
+  deploy lên máy Linux của Sinh cho anh kiểm tra và sửa tiếp theo ý anh;
+  KHÔNG tự bump version, KHÔNG tự tạo GitHub release. Giữ nguyên số
+  version của bản phát hành gần nhất trong lúc test. Khi nào Sinh nói
+  "đưa lên / phát hành" mới bump đủ 4 nơi + tạo release một lần cho cả
+  chùm thay đổi đã tích luỹ.
 - Sửa đúng điểm được chỉ, không tự mở rộng phạm vi.
 - Kiểm chứng trên bản sao dữ liệu / render Xvfb trước khi đụng vào bản thật.
 - Bump đủ 4 nơi khi phát hành: `VERSION` trong `server.py` + `app.py`,
@@ -292,3 +298,9 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   thì làm thẳng, không hỏi lại.
 - File này (`muse.md`) được tạo ngày 2026-11-16 theo yêu cầu của chủ dự
   án, sau khi tham khảo cấu trúc `AGENTS.md` ở các tài liệu/repo khác.
+- **Đổi chính sách phát hành (2026-11-17 00:16, lệnh của Sinh):** từ nay
+  sửa nhỏ chỉ deploy lên máy anh để anh test và góp ý tiếp — KHÔNG tự
+  phát hành từng bản nhỏ nữa. Chỉ khi anh kêu "đưa lên" mới bump version
+  + release một lần cho cả chùm. Đã ghi vào mục 5 ở trên và constitution
+  (lên v1.0.1). Hai bản v1.6.3/v1.6.4 vừa đăng trước lệnh này vẫn giữ
+  nguyên trên GitHub.

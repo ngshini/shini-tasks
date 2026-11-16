@@ -114,9 +114,12 @@ là xong.
 - `muse.md` ở gốc repo là nhật ký làm việc và lịch sử quyết định; constitution
   này là văn bản quy phạm. Khi hai bên lệch nhau, constitution thắng và
   `muse.md` MUST được sửa lại cho khớp.
-- Phát hành: bump đủ 4 nơi — `VERSION` trong `server.py` và `app.py`,
-  `AppVersion` trong `packaging/ShiniTasks.iss`, badge trong `README.md` —
-  kèm ghi chú phát hành tiếng Việt; commit dưới danh tính của chủ dự án.
+- Phát hành: CHỈ khi chủ dự án ra lệnh phát hành. Các thay đổi nhỏ trước
+  đó chỉ triển khai lên máy của chủ dự án để kiểm tra và chỉnh sửa theo ý
+  ông, giữ nguyên số phiên bản của bản phát hành gần nhất. Khi phát hành:
+  bump đủ 4 nơi — `VERSION` trong `server.py` và `app.py`, `AppVersion`
+  trong `packaging/ShiniTasks.iss`, badge trong `README.md` — kèm ghi
+  chú phát hành tiếng Việt; commit dưới danh tính của chủ dự án.
 - File test/probe/script tạm MUST NOT vào commit phát hành; chúng sống ngoài
   repo hoặc ở thư mục tạm.
 - Trước mọi thao tác trên máy thật của người dùng: báo trước làm gì, máy nào,
@@ -136,4 +139,4 @@ nguyên tắc theo hướng không tương thích ngược; MINOR khi thêm nguy
 mới hoặc mở rộng đáng kể; PATCH khi chỉ làm rõ câu chữ. `muse.md` ghi lại
 toàn bộ quá trình áp dụng; constitution chỉ giữ phần quy phạm hiện hành.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-16 | **Last Amended**: 2026-11-16
+**Version**: 1.0.1 | **Ratified**: 2026-11-16 | **Last Amended**: 2026-11-17
