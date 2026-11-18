@@ -1582,7 +1582,9 @@ class DetailPane:
         sec_sub.append(self.sub_head)
         self.sub_rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         sec_sub.append(self.sub_rows)
-        for s in subs: self._sub_row(s.get("t", ""), bool(s.get("done")), s.get("desc", ""))
+        for s in subs: self._sub_row(s.get("t", ""), bool(s.get("done")),
+                                     s.get("desc") or s.get("d") or "",
+                                     "d" if s.get("d") and not s.get("desc") else "desc")
         add_sub = Gtk.Button(label="＋ Thêm việc con"); add_sub.add_css_class("flat"); add_sub.add_css_class("dlgflat")
         add_sub.set_halign(Gtk.Align.START)
         add_sub.connect("clicked", lambda *_: self._sub_row("", False, focus=True))
@@ -1933,7 +1935,10 @@ class DetailPane:
         self.win.refresh()
 
     # ---------- Việc con ----------
-    def _sub_row(self, text, done, desc="", focus=False):
+    def _sub_row(self, text, done, desc="", desc_key="desc", focus=False):
+        # Sinh (2026-11-19): việc con KHÔNG cần ô mô tả — chỉ một dòng
+        # tên + tick xong. Mô tả cũ (nếu có) vẫn được GIỮ NGUYÊN trong
+        # dữ liệu qua _desc_text/_desc_key, chỉ là không còn ô để sửa.
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         row = Gtk.Box(spacing=6)
         chk = Gtk.CheckButton(); chk.set_active(done); chk.set_valign(Gtk.Align.CENTER)
@@ -1946,13 +1951,8 @@ class DetailPane:
         rm.connect("clicked", lambda *_: (self.sub_rows.remove(outer), self._save_subs()))
         row.append(chk); row.append(ent); row.append(rm)
         outer.append(row)
-        dent = Gtk.Entry(); dent.set_text(desc or "")
-        dent.set_placeholder_text("Mô tả việc con (không bắt buộc)…")
-        dent.set_margin_start(30)
-        dent.connect("activate", lambda *_: self._save_subs())
-        self._leave(dent, self._save_subs)
-        outer.append(dent)
-        outer._chk, outer._ent, outer._desc = chk, ent, dent
+        outer._chk, outer._ent = chk, ent
+        outer._desc_text, outer._desc_key = desc or "", desc_key
         self.sub_rows.append(outer)
         if focus: ent.grab_focus()
 
@@ -1962,8 +1962,8 @@ class DetailPane:
             t = row._ent.get_text().strip()
             if t:
                 item = {"t": t, "done": row._chk.get_active()}
-                d = row._desc.get_text().strip()
-                if d: item["desc"] = d
+                d = getattr(row, "_desc_text", "")
+                if d: item[getattr(row, "_desc_key", "desc")] = d
                 out.append(item)
         return out
 

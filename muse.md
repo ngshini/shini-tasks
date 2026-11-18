@@ -399,3 +399,8 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   nhận xét 150–220 chữ + 3 gợi ý; chưa có key thì mời mở Cài đặt.
   Roadmap còn lại (chưa làm, đã ghi trong AUDIT): companion điện thoại
   thật, Google Calendar 2 chiều, Flatpak.
+- 2026-11-19 (Sinh: việc con không cần mô tả): bỏ hẳn ô "Mô tả việc
+  con" khỏi trình sửa việc con trong popup chi tiết — mỗi việc con còn
+  một dòng (tick + tên + ✕). Mô tả cũ nếu có vẫn giữ nguyên trong dữ
+  liệu (hàng nhớ _desc_text/_desc_key, hỗ trợ cả khóa "desc" lẫn "d"),
+  chỉ không còn ô nhập. Đã deploy Linux + chụp kiểm chứng, chưa release.
