@@ -404,3 +404,8 @@ tiếp. Các quyết định dưới đây ĐANG HIỆU LỰC trừ khi ghi "đ�
   một dòng (tick + tên + ✕). Mô tả cũ nếu có vẫn giữ nguyên trong dữ
   liệu (hàng nhớ _desc_text/_desc_key, hỗ trợ cả khóa "desc" lẫn "d"),
   chỉ không còn ô nhập. Đã deploy Linux + chụp kiểm chứng, chưa release.
+- 2026-11-19 (Sinh: icon việc lớn và việc con phải khác nhau): trên
+  thẻ, việc lớn giữ ô tick TRÒN (button.chk), việc con đổi sang ô
+  VUÔNG bo góc 4px (button.subchk — ghi đè border-radius ở đuôi cả hai
+  theme). Trước đây cả hai đều tròn, chỉ khác cỡ 16/13px nên nhìn như
+  một. Đã deploy Linux + chụp kiểm chứng theme sáng, chưa release.

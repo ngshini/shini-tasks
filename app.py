@@ -600,6 +600,9 @@ textview.panenotes text { background: #262B36; color: #EDEDED; }
 button:focus-visible, entry:focus-visible, searchentry:focus-visible,
 dropdown:focus-visible, spinbutton:focus-visible, textview:focus-visible {
   outline-color: #4C8DFF; outline-style: solid; outline-width: 2px; outline-offset: 1px; }
+/* Việc con = ô VUÔNG bo góc, việc lớn giữ ô TRÒN — phân biệt ngay trên
+   thẻ (Sinh, 2026-11-19; trước đây cả hai đều tròn, chỉ khác cỡ) */
+button.subchk { border-radius: 4px; }
 """
 
 LIGHT_CSS = """
@@ -843,6 +846,9 @@ textview.panenotes text { background: #FFFFFF; color: #171717; }
 button:focus-visible, entry:focus-visible, searchentry:focus-visible,
 dropdown:focus-visible, spinbutton:focus-visible, textview:focus-visible {
   outline-color: #2563EB; outline-style: solid; outline-width: 2px; outline-offset: 1px; }
+/* Việc con = ô VUÔNG bo góc, việc lớn giữ ô TRÒN — phân biệt ngay trên
+   thẻ (Sinh, 2026-11-19; trước đây cả hai đều tròn, chỉ khác cỡ) */
+button.subchk { border-radius: 4px; }
 """
 
 def api(method, path, body=None, _retry=True):
